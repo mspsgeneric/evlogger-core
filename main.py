@@ -12,6 +12,11 @@ from util.supabase import get_supabase
 supabase = get_supabase()
 
 TOKEN = os.getenv("DISCORD_TOKEN")
+SUPABASE_URL = os.getenv("SUPABASE_URL")
+SUPABASE_KEY = os.getenv("SUPABASE_KEY")
+BREVO_API_KEY = os.getenv("BREVO_API_KEY")
+MAIL_FROM = os.getenv("MAIL_FROM")
+MAIL_NAME = os.getenv("MAIL_NAME")
 
 intents = Intents.default()
 intents.message_content = True
