@@ -20,7 +20,7 @@ async def setup(bot: commands.Bot):
     @bot.tree.command(name="encerrar_cena", description="Encerra a cena atual e envia o log por e-mail e DM.")
     @apenas_admin()
     async def encerrar_cena(interaction: discord.Interaction):
-        await interaction.response.defer(ephemeral=True, thinking=True)
+        await interaction.response.send_message("🔮 EVlogger está usando Olhos do Passado…", ephemeral=True)
         print("DEBUG: /encerrar_cena foi acionado!")
 
         resultado = await coletar_e_enviar_log(
@@ -30,6 +30,6 @@ async def setup(bot: commands.Bot):
         )
 
         if resultado["email"] or resultado["dm"]:
-            await interaction.followup.send("✅ Cena encerrada! Log enviado por e-mail e/ou DM.", ephemeral=True)
+            await interaction.followup.send("✅ Cena encerrada! Log enviado por e-mail e/ou DM e armazenado em Memória Eidética.", ephemeral=True)
         else:
             await interaction.followup.send("❌ Falha ao enviar o log por e-mail e DM.", ephemeral=True)
