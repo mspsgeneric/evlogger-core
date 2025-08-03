@@ -8,25 +8,30 @@ MAX_REPLY_PREVIEW = 100
 
 async def coletar_e_enviar_log(channel: discord.TextChannel, user: discord.User, guild_id: str):
     mensagens = []
+    
     for msg in [m async for m in channel.history(limit=None, oldest_first=True)]:
-        timestamp = msg.created_at.strftime("%d/%m/%Y %H:%M")
-        autor = msg.author.display_name
-        conteudo = msg.content.strip()
+        try:
+            timestamp = msg.created_at.strftime("%d/%m/%Y %H:%M")
+            autor = msg.author.display_name
+            conteudo = msg.content.strip()
 
-        replied_text = ""
-        if msg.reference and msg.reference.resolved:
-            trecho = msg.reference.resolved.content
-            if trecho:
-                trecho = trecho.replace("\n", " ")
-                if len(trecho) > MAX_REPLY_PREVIEW:
-                    trecho = trecho[:MAX_REPLY_PREVIEW] + "..."
-                replied_text = f'[Resposta a {msg.reference.resolved.author.display_name}: "{trecho}"]\n'
-        conteudo = replied_text + conteudo
+            replied_text = ""
+            if msg.reference and msg.reference.resolved:
+                trecho = msg.reference.resolved.content
+                if trecho:
+                    trecho = trecho.replace("\n", " ")
+                    if len(trecho) > MAX_REPLY_PREVIEW:
+                        trecho = trecho[:MAX_REPLY_PREVIEW] + "..."
+                    replied_text = f'[Resposta a {msg.reference.resolved.author.display_name}: "{trecho}"]\n'
+            conteudo = replied_text + conteudo
 
-        if msg.attachments:
-            conteudo += "\n" + "\n".join(a.url for a in msg.attachments)
+            if msg.attachments:
+                conteudo += "\n" + "\n".join(a.url for a in msg.attachments)
 
-        mensagens.append(f"[{timestamp}] {autor}:\n{conteudo}")
+            mensagens.append(f"[{timestamp}] {autor}:\n{conteudo}")
+        except Exception as e:
+            print(f"❌ Erro processando mensagem {msg.id if msg else 'sem id'}: {e}")
+
 
     log_txt = "\n\n".join(mensagens)
     log_html = "<br><br>".join(m.replace("\n", "<br>") for m in mensagens)
