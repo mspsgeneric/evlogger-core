@@ -27,7 +27,8 @@ class ConfirmarLimpeza(discord.ui.View):
             await interaction.response.send_message("❌ Apenas o autor do comando pode confirmar.", ephemeral=True)
             return
 
-        await interaction.response.defer(ephemeral=True, thinking=True)
+        await interaction.response.send_message("🕯️ EVlogger está usando Olhos do Passado…", ephemeral=True)
+
         canal_original = self.interaction.channel
         guild_id = str(self.interaction.guild.id)
         user = self.interaction.user

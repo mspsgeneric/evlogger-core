@@ -20,7 +20,8 @@ async def setup(bot: commands.Bot):
     @bot.tree.command(name="encerrar_cena", description="Encerra a cena atual e envia o log por e-mail e DM.")
     @apenas_admin()
     async def encerrar_cena(interaction: discord.Interaction):
-        await interaction.response.send_message("🔮 EVlogger está usando Olhos do Passado…", ephemeral=True)
+        await interaction.response.send_message("🕯️ EVlogger está usando Olhos do Passado…", ephemeral=True)
+
         print("DEBUG: /encerrar_cena foi acionado!")
 
         resultado = await coletar_e_enviar_log(
