@@ -35,10 +35,17 @@ async def verificar_acesso(request):
         data = await request.json()
         canal_id = int(data.get("canal_id"))
         usuario_id = int(data.get("usuario_id"))
+        print(f"\n📥 Recebida verificação de acesso: canal_id={canal_id}, usuario_id={usuario_id}")
+
         canal = bot.get_channel(canal_id)
 
         if canal is None:
-            print(f"❌ Canal {canal_id} não encontrado.")
+            print(f"❌ Canal {canal_id} não encontrado pelo bot.")
+            # Log extra: mostrar canais carregados
+            canais_ids = [c.id for g in bot.guilds for c in g.text_channels]
+            print(f"📃 Canais disponíveis no bot: {len(canais_ids)} canais carregados.")
+            if canal_id not in canais_ids:
+                print(f"⚠️ O canal {canal_id} não está entre os canais carregados.")
             return web.json_response({"acesso": False, "erro": "Canal não encontrado"})
 
         guild = canal.guild
@@ -49,17 +56,18 @@ async def verificar_acesso(request):
                 print(f"🔍 Buscando membro {usuario_id} no servidor {guild.name}...")
                 membro = await guild.fetch_member(usuario_id)
             except Exception as e:
-                print(f"❌ Não foi possível buscar o membro {usuario_id}: {e}")
+                print(f"❌ Não foi possível buscar o membro {usuario_id} no servidor {guild.name}: {e}")
                 return web.json_response({"acesso": False, "erro": "Usuário não encontrado"})
 
         perms = canal.permissions_for(membro)
-        print(f"🔐 Permissão de leitura do usuário {usuario_id} no canal {canal_id}: {perms.read_messages}")
+        print(f"🔐 Permissão de leitura do usuário {usuario_id} no canal {canal.name} ({canal_id}): {perms.read_messages}")
 
         return web.json_response({"acesso": perms.read_messages})
 
     except Exception as e:
         print(f"❌ Erro na verificação de acesso: {e}")
         return web.json_response({"acesso": False, "erro": str(e)})
+
 
 
 
