@@ -151,9 +151,9 @@ async def on_ready():
 
         runner = web.AppRunner(app)
         await runner.setup()
-        site = web.TCPSite(runner, "127.0.0.1", 8765)  # Porta local, protegida
+        site = web.TCPSite(runner, "0.0.0.0", 8937)
         await site.start()
-        print("🔐 API local de verificação iniciada em http://127.0.0.1:8765")
+        print("🔐 API pública de verificação iniciada em http://0.0.0.0:8937")
 
     # Dentro do on_ready, após os prints e sync:
     asyncio.create_task(iniciar_api_verificacao())
