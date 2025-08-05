@@ -4,6 +4,9 @@ import csv
 from discord.ext import commands
 from discord import Intents
 from dotenv import load_dotenv
+import asyncio
+from aiohttp import web
+
 
 # Carrega as variáveis do .env antes de qualquer uso
 load_dotenv()
@@ -25,6 +28,40 @@ bot = commands.Bot(command_prefix="!", intents=intents)
 
 # Lista de servidores autorizados (carregada do CSV)
 SERVIDORES_AUTORIZADOS = {}
+
+
+async def verificar_acesso(request):
+    try:
+        data = await request.json()
+        canal_id = int(data.get("canal_id"))
+        usuario_id = int(data.get("usuario_id"))
+        canal = bot.get_channel(canal_id)
+
+        if canal is None:
+            print(f"❌ Canal {canal_id} não encontrado.")
+            return web.json_response({"acesso": False, "erro": "Canal não encontrado"})
+
+        guild = canal.guild
+        membro = guild.get_member(usuario_id)
+
+        if membro is None:
+            try:
+                print(f"🔍 Buscando membro {usuario_id} no servidor {guild.name}...")
+                membro = await guild.fetch_member(usuario_id)
+            except Exception as e:
+                print(f"❌ Não foi possível buscar o membro {usuario_id}: {e}")
+                return web.json_response({"acesso": False, "erro": "Usuário não encontrado"})
+
+        perms = canal.permissions_for(membro)
+        print(f"🔐 Permissão de leitura do usuário {usuario_id} no canal {canal_id}: {perms.read_messages}")
+
+        return web.json_response({"acesso": perms.read_messages})
+
+    except Exception as e:
+        print(f"❌ Erro na verificação de acesso: {e}")
+        return web.json_response({"acesso": False, "erro": str(e)})
+
+
 
 def carregar_servidores_autorizados():
     global SERVIDORES_AUTORIZADOS
@@ -107,6 +144,20 @@ async def on_ready():
         print(f"📤 {len(synced)} comandos de barra sincronizados.")
     except Exception as e:
         print(f"⚠️ Erro ao sincronizar comandos: {e}")
+
+    async def iniciar_api_verificacao():
+        app = web.Application()
+        app.router.add_post("/verificar_acesso", verificar_acesso)
+
+        runner = web.AppRunner(app)
+        await runner.setup()
+        site = web.TCPSite(runner, "127.0.0.1", 8765)  # Porta local, protegida
+        await site.start()
+        print("🔐 API local de verificação iniciada em http://127.0.0.1:8765")
+
+    # Dentro do on_ready, após os prints e sync:
+    asyncio.create_task(iniciar_api_verificacao())
+
 
 
 @bot.event
