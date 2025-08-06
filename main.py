@@ -199,7 +199,7 @@ async def load_commands():
     await bot.load_extension("comandos.limpar_cena")
     await bot.load_extension("comandos.ajuda")
     await bot.load_extension("comandos.obter_log")
-
+    await bot.load_extension("comandos.gerar_evlog")
 
 
 async def main():
