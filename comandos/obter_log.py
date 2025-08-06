@@ -19,7 +19,8 @@ class ObterLog(commands.Cog):
         resultado = await coletar_e_enviar_log(
             channel=interaction.channel,
             user=interaction.user,
-            guild_id=str(interaction.guild.id)
+            guild_id=str(interaction.guild.id),
+            enviar_email_ativo=False  # ✅ aqui está a correção
         )
 
         if resultado["dm"]:

@@ -7,7 +7,8 @@ supabase = get_supabase()
 MAX_REPLY_PREVIEW = 100
 MENTION_PATTERN = re.compile(r"<@!?(\d+)>")
 
-async def coletar_e_enviar_log(channel: discord.TextChannel, user: discord.User, guild_id: str):
+async def coletar_e_enviar_log(channel: discord.TextChannel, user: discord.User, guild_id: str, enviar_email_ativo: bool = True):
+
     mensagens = []
     apelido_cache = {}
 
@@ -73,7 +74,6 @@ async def coletar_e_enviar_log(channel: discord.TextChannel, user: discord.User,
                 inicio, fim = match.span()
                 conteudo = conteudo[:inicio] + f"@{nome}" + conteudo[fim:]
 
-
             # Anexos
             if msg.attachments:
                 conteudo += "\n" + "\n".join(a.url for a in msg.attachments)
@@ -91,33 +91,34 @@ async def coletar_e_enviar_log(channel: discord.TextChannel, user: discord.User,
     email = None
 
     # Envia email
-    try:
-        result = supabase.table("emails").select("email").eq("guild_id", guild_id).execute()
+    if enviar_email_ativo:
+        try:
+            result = supabase.table("emails").select("email").eq("guild_id", guild_id).execute()
 
-        if result.data:
-            email = result.data[0]["email"]
-            guild_name = html.escape(channel.guild.name)
-            log_escape = html.escape(log_txt)
+            if result.data:
+                email = result.data[0]["email"]
+                guild_name = html.escape(channel.guild.name)
+                log_escape = html.escape(log_txt)
 
-            assunto = f"[{guild_name}] Log da cena: {channel.name}"
-            corpo_html = textwrap.dedent(f"""
-                <p>Olá, <strong>{guild_name}</strong>!</p>
-                <p>Segue abaixo o log completo da cena <strong>"{channel.name}"</strong>:</p>
-                <pre style="font-family: monospace; font-size: 13px;">
+                assunto = f"[{guild_name}] Log da cena: {channel.name}"
+                corpo_html = textwrap.dedent(f"""
+                    <p>Olá, <strong>{guild_name}</strong>!</p>
+                    <p>Segue abaixo o log completo da cena <strong>"{channel.name}"</strong>:</p>
+                    <pre style="font-family: monospace; font-size: 13px;">
 {log_escape}
-                </pre>
-                <p>Boa leitura e até a próxima cena!</p>
-                <p><em>Enviado por EVlogger – Eddverso</em></p>
-                <p style="font-size: 12px; color: #555;">
-                Acesse o <a href="https://eddverso.com.br">eddverso.com.br</a> para visualizar e gerenciar suas fichas.
-                </p>
-            """)
+                    </pre>
+                    <p>Boa leitura e até a próxima cena!</p>
+                    <p><em>Enviado por EVlogger – Eddverso</em></p>
+                    <p style="font-size: 12px; color: #555;">
+                    Acesse o <a href="https://eddverso.com.br">eddverso.com.br</a> para visualizar e gerenciar suas fichas.
+                    </p>
+                """)
 
-            enviar_email(destinatario=email, assunto=assunto, corpo_html=corpo_html)
-            email_ok = True
+                enviar_email(destinatario=email, assunto=assunto, corpo_html=corpo_html)
+                email_ok = True
 
-    except Exception as e:
-        print("❌ Falha ao enviar email:", e)
+        except Exception as e:
+            print("❌ Falha ao enviar email:", e)
 
     # Envia DM
     try:
