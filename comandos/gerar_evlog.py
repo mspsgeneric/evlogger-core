@@ -5,7 +5,9 @@ import json
 from datetime import datetime
 import os
 import re
+import logging
 
+logger = logging.getLogger(__name__)
 MENTION_PATTERN = re.compile(r"<@!?(\d+)>")  # captura <@123> ou <@!123>
 
 class GerarEvlog(commands.Cog):
@@ -33,11 +35,14 @@ class GerarEvlog(commands.Cog):
         canal = interaction.channel
         apelido_cache = {}
 
+        logger.info(
+            f"[GERAR_EVLOG] Comando acionado por {interaction.user} (ID: {interaction.user.id}) no canal '{canal.name}' do servidor '{interaction.guild.name}' (ID: {interaction.guild.id})"
+        )
+
         try:
             async for msg in canal.history(limit=None, oldest_first=True):
                 autor_id = msg.author.id
 
-                # Usa cache para nome/apelido
                 if autor_id in apelido_cache:
                     autor = apelido_cache[autor_id]
                 else:
@@ -50,8 +55,7 @@ class GerarEvlog(commands.Cog):
                 apelido = autor.display_name
                 nome_completo = str(autor)
 
-                # Captura conteúdo da mensagem ou do embed
-                conteudo = msg.content
+                conteudo = msg.content or ""
                 if not conteudo and msg.embeds:
                     embed = msg.embeds[0]
                     partes = []
@@ -61,7 +65,6 @@ class GerarEvlog(commands.Cog):
                         partes.append(embed.description)
                     conteudo = "\n".join(partes)
 
-                # Substitui menções no conteúdo
                 matches = list(MENTION_PATTERN.finditer(conteudo))
                 for match in reversed(matches):
                     user_id = int(match.group(1))
@@ -86,18 +89,23 @@ class GerarEvlog(commands.Cog):
                     "autor": nome_completo,
                     "id_autor": autor_id,
                     "apelido": apelido,
-                    "avatar_url": str(autor.display_avatar.url),
+                    "avatar_url": str(getattr(autor.display_avatar, "url", "")),
                     "data": msg.created_at.strftime("%Y-%m-%d %H:%M:%S"),
                     "conteudo": conteudo,
                     "anexos": [a.url for a in msg.attachments]
                 })
 
-            # Cria nome de arquivo
+            if not mensagens:
+                await interaction.followup.send("⚠️ Nenhuma mensagem encontrada neste canal.", ephemeral=True)
+                return
+
             nome_base = re.sub(r'\W+', '_', canal.name)
-            nome_arquivo = f"{nome_base}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.evlog"
+            nome_arquivo = f"{nome_base}_{canal.id}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.evlog"
 
             with open(nome_arquivo, "w", encoding="utf-8") as f:
                 json.dump(mensagens, f, ensure_ascii=False, indent=2)
+
+            logger.info(f"[GERAR_EVLOG] Log gerado: {nome_arquivo} com {len(mensagens)} mensagens")
 
             await interaction.followup.send(
                 f"✅ Exportação finalizada com sucesso. `{nome_arquivo}` está pronto para uso no aplicativo EVlogger.",
@@ -107,8 +115,8 @@ class GerarEvlog(commands.Cog):
             os.remove(nome_arquivo)
 
         except Exception as e:
+            logger.error("[GERAR_EVLOG] Erro inesperado ao gerar .evlog:", exc_info=True)
             await interaction.followup.send("❌ Ocorreu um erro ao gerar o log.", ephemeral=True)
-            raise e
 
     @gerar_evlog.error
     async def gerar_evlog_error(self, interaction: Interaction, error):
@@ -118,11 +126,11 @@ class GerarEvlog(commands.Cog):
                 ephemeral=True
             )
         else:
+            logger.error("[GERAR_EVLOG] Erro inesperado fora do corpo do comando:", exc_info=True)
             await interaction.response.send_message(
                 "❌ Ocorreu um erro inesperado.",
                 ephemeral=True
             )
-            raise error
 
 async def setup(bot: commands.Bot):
     await bot.add_cog(GerarEvlog(bot))

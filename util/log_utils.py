@@ -1,7 +1,9 @@
-import discord, html, textwrap, re
+import discord, html, textwrap, re, logging
 from io import BytesIO
 from util.supabase import get_supabase
 from util.email import enviar_email
+
+logger = logging.getLogger(__name__)
 
 supabase = get_supabase()
 MAX_REPLY_PREVIEW = 100
@@ -33,7 +35,7 @@ async def coletar_e_enviar_log(channel: discord.TextChannel, user: discord.User,
             # Trata reply
             replied_text = ""
             if msg.reference and msg.reference.resolved:
-                trecho = msg.reference.resolved.content
+                trecho = getattr(msg.reference.resolved, "content", "")
                 if trecho:
                     trecho = trecho.replace("\n", " ")
                     if len(trecho) > MAX_REPLY_PREVIEW:
@@ -41,20 +43,9 @@ async def coletar_e_enviar_log(channel: discord.TextChannel, user: discord.User,
                     replied_text = f'[Resposta a {msg.reference.resolved.author.display_name}: "{trecho}"]\n'
             conteudo = replied_text + conteudo
 
-            # Substitui menções por apelidos
-            def substituir_mencao(match):
-                user_id = int(match.group(1))
-                if user_id in apelido_cache:
-                    return f"@{apelido_cache[user_id]}"
-                membro = channel.guild.get_member(user_id)
-                if membro:
-                    apelido_cache[user_id] = membro.display_name
-                    return f"@{membro.display_name}"
-                return f"@{user_id}"
-
-            # Substituir menções manualmente de forma assíncrona
+            # Substitui menções
             matches = list(MENTION_PATTERN.finditer(conteudo))
-            for match in reversed(matches):  # de trás pra frente para não bagunçar os índices
+            for match in reversed(matches):
                 user_id = int(match.group(1))
                 if user_id in apelido_cache:
                     nome = apelido_cache[user_id]
@@ -74,14 +65,13 @@ async def coletar_e_enviar_log(channel: discord.TextChannel, user: discord.User,
                 inicio, fim = match.span()
                 conteudo = conteudo[:inicio] + f"@{nome}" + conteudo[fim:]
 
-            # Anexos
             if msg.attachments:
                 conteudo += "\n" + "\n".join(a.url for a in msg.attachments)
 
             mensagens.append(f"[{timestamp}] {autor_apelido}:\n{conteudo}")
 
         except Exception as e:
-            print(f"❌ Erro processando mensagem {msg.id if msg else 'sem id'}: {e}")
+            logger.warning(f"[LOG_UTILS] Erro processando mensagem {msg.id if msg else 'sem id'}: {e}")
 
     log_txt = "\n\n".join(mensagens)
     log_html = "<br><br>".join(m.replace("\n", "<br>") for m in mensagens)
@@ -90,7 +80,6 @@ async def coletar_e_enviar_log(channel: discord.TextChannel, user: discord.User,
     dm_ok = False
     email = None
 
-    # Envia email
     if enviar_email_ativo:
         try:
             result = supabase.table("emails").select("email").eq("guild_id", guild_id).execute()
@@ -118,15 +107,14 @@ async def coletar_e_enviar_log(channel: discord.TextChannel, user: discord.User,
                 email_ok = True
 
         except Exception as e:
-            print("❌ Falha ao enviar email:", e)
+            logger.warning(f"[LOG_UTILS] Falha ao enviar email: {e}")
 
-    # Envia DM
     try:
-        log_file = discord.File(fp=BytesIO(log_txt.encode("utf-8")), filename=f"log_{channel.name}.txt")
+        log_file = discord.File(fp=BytesIO(log_txt.encode("utf-8")), filename=f"log_{channel.name}_{channel.id}.txt")
         await user.send(content=f"📄 Aqui está o log da cena `{channel.name}`:", file=log_file)
         dm_ok = True
     except Exception as e:
-        print("❌ Falha ao enviar DM:", e)
+        logger.warning(f"[LOG_UTILS] Falha ao enviar DM: {e}")
 
     return {
         "email": email_ok,

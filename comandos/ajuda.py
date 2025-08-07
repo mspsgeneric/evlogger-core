@@ -3,51 +3,49 @@ from discord.ext import commands
 import discord
 
 async def setup(bot: commands.Bot):
-    @bot.tree.command(name="ajuda", description="Lista os comandos disponíveis do EVlogger")
+    @bot.tree.command(name="ajuda", description="Mostra todos os comandos disponíveis do EVlogger.")
     async def ajuda(interaction: discord.Interaction):
         embed = discord.Embed(
             title="📘 Comandos do EVlogger",
-            description="Veja abaixo os comandos disponíveis:",
+            description="Ferramentas para registrar, exportar e limpar cenas do Discord.",
             color=discord.Color.blue()
         )
 
         embed.add_field(
-            name="🔐 Comandos para administradores:",
-            value="Esses comandos requerem permissões administrativas no servidor.",
+            name="🔐 Comandos para administradores",
+            value=(
+                "**/definir_email [email]**\n"
+                "Define o e-mail que receberá os logs das cenas deste servidor.\n\n"
+                "**/mostrar_email**\n"
+                "Mostra o e-mail atualmente configurado para envio de logs.\n\n"
+                "**/encerrar_cena**\n"
+                "Salva o log da cena atual, envia por e-mail (caso configurado) e também por DM em formato `.txt`.\n\n"
+                "**/limpar_canal**\n"
+                "⚠️ 'Limpa' o canal atual.\n"
+                "O log será salvo e enviado antes da limpeza, se possível."
+            ),
             inline=False
         )
 
         embed.add_field(
-            name="/definir_email [email]",
-            value="Define ou redefine o e-mail que receberá os logs das cenas neste servidor.",
+            name="👥 Comando para jogadores",
+            value=(
+                "**/obter_log**\n"
+                "Envia por DM o log da cena atual (em `.txt`). Pode ser usado por qualquer membro com permissão de leitura no canal."
+            ),
             inline=False
         )
-
         embed.add_field(
-            name="/mostrar_email",
-            value="Mostra o e-mail atualmente configurado para este servidor.",
+            name="⚙️ Outros comandos",
+            value=(
+                "**/gerar_evlog**\n"
+                "Gera um arquivo `.evlog` com o conteúdo completo do canal atual.\n"
+                "Inclui mensagens, anexos e imagens incorporadas.\n"
+                "Use o programa **EVlogger Converter** para visualizar esse arquivo localmente com layout aprimorado."
+            ),
             inline=False
         )
 
-        embed.add_field(
-            name="/encerrar_cena",
-            value="Salva o log completo da cena atual, envia por e-mail e por DM (em .txt).",
-            inline=False
-        )
 
-        embed.add_field(
-            name="/limpar_canal",
-            value="⚠️ Apaga o canal atual e cria um novo vazio com as mesmas permissões.\n"
-                  "O log será salvo e enviado antes da limpeza, se possível.",
-            inline=False
-        )
-
-        embed.add_field(
-            name="👥 Comando para jogadores:",
-            value="/obter_log — Envia via DM o log da cena atual (em .txt). Pode ser usado por qualquer membro.",
-            inline=False
-        )
-
-        embed.set_footer(text="Dúvidas ou sugestões? Fale com o criador do bot!")
-
+        embed.set_footer(text="Dúvidas ou sugestões? Fale com o criador do bot.")
         await interaction.response.send_message(embed=embed, ephemeral=True)
