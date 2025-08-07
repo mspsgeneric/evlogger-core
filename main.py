@@ -4,7 +4,38 @@ import csv
 from discord.ext import commands
 from discord import Intents
 from dotenv import load_dotenv
-import asyncio
+
+
+import logging
+from logging.handlers import TimedRotatingFileHandler
+from datetime import datetime
+
+# Cria a pasta de logs se não existir
+os.makedirs("logs", exist_ok=True)
+
+# Define o arquivo de log baseado no mês atual
+log_filename = f"logs/evlogger_{datetime.now().strftime('%Y-%m')}.log"
+
+# Configura o logger com rotação mensal e retenção de 24 arquivos (~2 anos)
+file_handler = TimedRotatingFileHandler(
+    filename=log_filename,
+    when="midnight",
+    interval=30,
+    backupCount=24,
+    encoding="utf-8"
+)
+
+# Aplica a configuração global de logging
+logging.basicConfig(
+    level=logging.INFO,
+    format='[%(asctime)s] %(levelname)s:%(name)s: %(message)s',
+    handlers=[
+        file_handler,
+        logging.StreamHandler()  # Mantém a exibição no tmux
+    ]
+)
+
+
 from aiohttp import web
 
 
