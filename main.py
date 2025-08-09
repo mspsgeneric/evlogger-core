@@ -4,11 +4,11 @@ import csv
 from discord.ext import commands
 from discord import Intents
 from dotenv import load_dotenv
-
-
 import logging
 from logging.handlers import TimedRotatingFileHandler
 from datetime import datetime
+import discord
+
 
 # Cria a pasta de logs se não existir
 os.makedirs("logs", exist_ok=True)
@@ -35,12 +35,17 @@ logging.basicConfig(
     ]
 )
 
-
 from aiohttp import web
 
 
-# Carrega as variáveis do .env antes de qualquer uso
-load_dotenv()
+# Carrega as variáveis de ambiente por ambiente (prod x dev)
+ENV = os.getenv("APP_ENV", "prod")
+if ENV == "dev":
+    load_dotenv(".env.dev")
+else:
+    load_dotenv()
+TEST_GUILD_ID = int(os.getenv("TEST_GUILD_ID", "0"))
+
 
 from util.supabase import get_supabase
 supabase = get_supabase()
@@ -174,21 +179,36 @@ async def on_ready():
 
     await asyncio.sleep(3)  # evita corridas no início com muitos servidores
 
-    for guild in bot.guilds:
-        if guild.id not in SERVIDORES_AUTORIZADOS:
-            print(f"🚫 Servidor não autorizado: {guild.name} ({guild.id}) — Saindo...")
-            try:
-                await guild.leave()
-            except Exception as e:
-                print(f"⚠️ Erro ao sair de {guild.name}: {e}")
-        else:
-            print(f"✅ Conectado ao servidor autorizado: {guild.name} ({guild.id})")
+    if ENV != "dev":
+        for guild in bot.guilds:
+            if guild.id not in SERVIDORES_AUTORIZADOS:
+                print(f"🚫 Servidor não autorizado: {guild.name} ({guild.id}) — Saindo...")
+                try:
+                    await guild.leave()
+                except Exception as e:
+                    print(f"⚠️ Erro ao sair de {guild.name}: {e}")
+            else:
+                print(f"✅ Conectado ao servidor autorizado: {guild.name} ({guild.id})")
+    else:
+        print("🔧 DEV: pulando checagem de servidores autorizados.")
 
+    
     try:
-        synced = await bot.tree.sync()
-        print(f"📤 {len(synced)} comandos de barra sincronizados.")
+        if ENV == "dev" and TEST_GUILD_ID:
+            guild = discord.Object(id=TEST_GUILD_ID)
+            # 👇 copia os comandos globais carregados pelos cogs para o servidor de teste
+            bot.tree.copy_global_to(guild=guild)
+            # 👇 sincroniza no guild (aparece na hora)
+            synced = await bot.tree.sync(guild=guild)
+            print(f"📤 {len(synced)} comandos de barra (DEV) sincronizados no guild {TEST_GUILD_ID}.")
+        else:
+            # produção: sync global (pode levar alguns minutos até 1h para propagar no Discord)
+            synced = await bot.tree.sync()
+            print(f"📤 {len(synced)} comandos de barra sincronizados globalmente.")
     except Exception as e:
         print(f"⚠️ Erro ao sincronizar comandos: {e}")
+
+
 
     async def iniciar_api_verificacao():
         app = web.Application()
@@ -234,6 +254,8 @@ async def load_commands():
     await bot.load_extension("comandos.ajuda")
     await bot.load_extension("comandos.obter_log")
     await bot.load_extension("comandos.gerar_evlog")
+    await bot.load_extension("comandos.pptb")
+
 
 
 async def main():

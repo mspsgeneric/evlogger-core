@@ -26,10 +26,7 @@ class GerarEvlog(commands.Cog):
             )
             return
 
-        await interaction.response.send_message(
-            "📦 Iniciando exportação... isso pode demorar em canais grandes.",
-            ephemeral=True
-        )
+        await interaction.response.defer(ephemeral=True, thinking=True)
 
         mensagens = []
         canal = interaction.channel
@@ -120,17 +117,18 @@ class GerarEvlog(commands.Cog):
 
     @gerar_evlog.error
     async def gerar_evlog_error(self, interaction: Interaction, error):
+        msg = "❌ Ocorreu um erro inesperado."
         if isinstance(error, commands.MissingPermissions):
-            await interaction.response.send_message(
-                "🚫 Este comando é restrito a administradores.",
-                ephemeral=True
-            )
+            msg = "🚫 Este comando é restrito a administradores."
+
+        logger.error("[GERAR_EVLOG] Erro inesperado fora do corpo do comando:", exc_info=True)
+
+        # ✅ Evita 40060: se já houve ack (send_message/defer), use followup
+        if interaction.response.is_done():
+            await interaction.followup.send(msg, ephemeral=True)
         else:
-            logger.error("[GERAR_EVLOG] Erro inesperado fora do corpo do comando:", exc_info=True)
-            await interaction.response.send_message(
-                "❌ Ocorreu um erro inesperado.",
-                ephemeral=True
-            )
+            await interaction.response.send_message(msg, ephemeral=True)
+
 
 async def setup(bot: commands.Bot):
     await bot.add_cog(GerarEvlog(bot))
