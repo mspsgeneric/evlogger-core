@@ -7,7 +7,7 @@ async def setup(bot: commands.Bot):
     async def ajuda(interaction: discord.Interaction):
         embed = discord.Embed(
             title="📘 Comandos do EVlogger",
-            description="Ferramentas para registrar, exportar e limpar cenas do Discord.",
+            description="Ferramentas para registrar, exportar e limpar cenas — e testes rápidos de jogada.",
             color=discord.Color.blue()
         )
 
@@ -35,6 +35,22 @@ async def setup(bot: commands.Bot):
             ),
             inline=False
         )
+
+        embed.add_field(
+            name="🎮 Pedra, Papel, Tesoura e Bomba",
+            value=(
+                "**/ppt [escolha]**\n"
+                "Pedra, Papel e Tesoura **(sem bomba)**.\n"
+                "• Sem parâmetro → abre botões.\n"
+                "• Com parâmetro → resolve direto. Opções: `pedra`, `papel`, `tesoura`, `aleatoria` (sorteia entre PPT).\n\n"
+                "**/pptb [escolha]**\n"
+                "Pedra, Papel, Tesoura e **Bomba**.\n"
+                "• Sem parâmetro → abre botões.\n"
+                "• Com parâmetro → resolve direto. Opções: `pedra`, `papel`, `tesoura`, `bomba`, `aleatoria` (pode sair 💣)."
+            ),
+            inline=False
+        )
+
         embed.add_field(
             name="⚙️ Outros comandos",
             value=(
@@ -45,7 +61,6 @@ async def setup(bot: commands.Bot):
             ),
             inline=False
         )
-
 
         embed.set_footer(text="Dúvidas ou sugestões? Fale com o criador do bot.")
         await interaction.response.send_message(embed=embed, ephemeral=True)
