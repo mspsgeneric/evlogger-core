@@ -1,17 +1,15 @@
-# comandos/pptb.py
+# comandos/ppt.py
 from secrets import choice as randchoice
 import discord
 from discord import app_commands
 from discord.ext import commands
 
-OPCOES_PPT  = ("pedra", "papel", "tesoura")
-OPCOES_PPTB = ("pedra", "papel", "tesoura", "bomba")
+OPCOES_PPT = ("pedra", "papel", "tesoura")
 
 WINS = {
     "pedra":   {"tesoura"},
     "papel":   {"pedra"},
-    "tesoura": {"papel", "bomba"},
-    "bomba":   {"pedra", "papel"},
+    "tesoura": {"papel"},
 }
 
 def resultado(a: str, b: str) -> str:
@@ -23,7 +21,7 @@ def resultado(a: str, b: str) -> str:
         return "bot"
     return "empate"
 
-class EscolhaView(discord.ui.View):
+class EscolhaViewPPT(discord.ui.View):
     def __init__(self, user_id: int, timeout: float = 90):
         super().__init__(timeout=timeout)
         self.user_id = user_id
@@ -48,18 +46,16 @@ class EscolhaView(discord.ui.View):
                 pass
 
     async def _resolver(self, interaction: discord.Interaction, jogada: str):
-        # ✅ ACK imediato da interação do botão (evita 10062)
+        # ACK imediato da interação do botão (evita 10062)
         await interaction.response.defer()
 
-        # Aleatória AGORA inclui bomba
         if jogada == "aleatoria":
-            jogada = randchoice(OPCOES_PPTB)
+            jogada = randchoice(OPCOES_PPT)
 
-        # BOT sempre pode usar bomba
-        bot_escolha = randchoice(OPCOES_PPTB)
+        bot_escolha = randchoice(OPCOES_PPT)
 
         r = resultado(jogada, bot_escolha)
-        emojis = {"pedra":"🪨","papel":"📄","tesoura":"✂️","bomba":"💣"}
+        emojis = {"pedra":"🪨","papel":"📄","tesoura":"✂️"}
 
         texto = (
             f"**Você**: {emojis[jogada]} **{jogada.capitalize()}**\n"
@@ -75,7 +71,6 @@ class EscolhaView(discord.ui.View):
         for c in self.children:
             c.disabled = True
 
-        # ✅ Edita a mensagem original da interação do slash
         await interaction.edit_original_response(content=texto, view=self)
 
     @discord.ui.button(label="Pedra", style=discord.ButtonStyle.secondary, emoji="🪨")
@@ -90,36 +85,30 @@ class EscolhaView(discord.ui.View):
     async def tesoura(self, interaction: discord.Interaction, button: discord.ui.Button):
         await self._resolver(interaction, "tesoura")
 
-    @discord.ui.button(label="Bomba", style=discord.ButtonStyle.danger, emoji="💣")
-    async def bomba(self, interaction: discord.Interaction, button: discord.ui.Button):
-        await self._resolver(interaction, "bomba")
-
     @discord.ui.button(label="Aleatória", style=discord.ButtonStyle.primary)
     async def aleatoria(self, interaction: discord.Interaction, button: discord.ui.Button):
         await self._resolver(interaction, "aleatoria")
 
-class PPTB(commands.Cog):
+class PPT(commands.Cog):
     def __init__(self, bot: commands.Bot):
         self.bot = bot
 
     @app_commands.command(
-        name="pptb",
-        description="Jogue Pedra, Papel, Tesoura e Bomba contra o bot (com botões)."
+        name="ppt",
+        description="Jogue Pedra, Papel e Tesoura contra o bot (sem bomba)."
     )
-    async def pptb(self, interaction: discord.Interaction):
-        view = EscolhaView(user_id=interaction.user.id, timeout=90)
+    async def ppt(self, interaction: discord.Interaction):
+        view = EscolhaViewPPT(user_id=interaction.user.id, timeout=90)
 
-        # ✅ ACK imediato do slash (gera uma mensagem 'pensando...' para podermos editar)
+        # ACK do slash (permite editar a mensagem original)
         await interaction.response.defer(thinking=True)
 
-        # Edite a mensagem original para colocar o texto e os botões
         await interaction.edit_original_response(content="Escolha sua jogada:", view=view)
 
-        # Guarde a referência para uso no timeout
         try:
             view.message = await interaction.original_response()
         except Exception:
             pass
 
 async def setup(bot: commands.Bot):
-    await bot.add_cog(PPTB(bot))
+    await bot.add_cog(PPT(bot))
