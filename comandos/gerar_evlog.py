@@ -16,15 +16,17 @@ class GerarEvlog(commands.Cog):
 
     @app_commands.command(
         name="gerar_evlog",
-        description="Exporta o log completo do canal atual como .evlog (somente administradores)"
+        description="Exporta o log completo do canal atual como .evlog"
     )
     async def gerar_evlog(self, interaction: Interaction):
-        if not interaction.user.guild_permissions.administrator:
+        perms = interaction.channel.permissions_for(interaction.user)
+        if not perms.read_messages:
             await interaction.response.send_message(
-                "🚫 Apenas administradores podem usar este comando.",
+                "🚫 Você não tem permissão para ler este canal, então não pode exportar o log.",
                 ephemeral=True
             )
             return
+
 
         await interaction.response.defer(ephemeral=True, thinking=True)
 
