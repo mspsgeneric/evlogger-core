@@ -271,6 +271,7 @@ async def load_commands():
     await bot.load_extension("comandos.ajuda")
     await bot.load_extension("comandos.obter_log")
     await bot.load_extension("comandos.gerar_evlog")
+    await bot.load_extension("comandos.arquivar_canal")
     await bot.load_extension("comandos.pptb")
     await bot.load_extension("comandos.ppt")
 
