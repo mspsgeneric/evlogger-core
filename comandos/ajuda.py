@@ -22,7 +22,10 @@ async def setup(bot: commands.Bot):
                 "Salva o log da cena atual, envia por e-mail (caso configurado) e também por DM em formato `.txt`.\n\n"
                 "**/limpar_canal**\n"
                 "⚠️ 'Limpa' o canal atual.\n"
-                "O log será salvo e enviado antes da limpeza, se possível."
+                "O log será salvo e enviado antes da limpeza, se possível.\n\n"
+                "**/arquivar_canal**\n"
+                "⚠️ Arquiva o canal atual **permanentemente**.\n"
+                "O log será salvo e enviado antes da exclusão, se possível."
             ),
             inline=False
         )
