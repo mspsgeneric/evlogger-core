@@ -1,0 +1,16 @@
+discord.py
+aiosqlite
+aiohttp
+googletrans==4.0.0rc1
+
+# chamadas HTTP para as RPCs do Supabase (não conflita com googletrans)
+requests>=2.31
+
+# garanta as versões que o googletrans espera:
+httpx==0.13.3
+httpcore==0.9.1
+h11==0.9.0
+
+python-dotenv
+# (opcional, útil no Windows para ZoneInfo)
+tzdata>=2024.1
