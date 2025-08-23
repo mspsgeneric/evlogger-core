@@ -8,6 +8,7 @@ import logging
 from logging.handlers import TimedRotatingFileHandler
 from datetime import datetime
 import discord
+from datetime import timedelta  # você já importa datetime acima
 
 # Cria a pasta de logs se não existir
 os.makedirs("logs", exist_ok=True)
@@ -187,6 +188,49 @@ def carregar_servidores_autorizados():
         else:
             print(f"🔐 Supabase: guild_id {guild_id_supabase} autorizado — mantido.")
 
+# --- agendamento diário do fetch/parse de bylaws ---
+
+
+def _seconds_until(hour: int, minute: int) -> float:
+    """Segundos até a próxima ocorrência de HH:MM (hora do servidor)."""
+    now = datetime.now()
+    target = now.replace(hour=hour, minute=minute, second=0, microsecond=0)
+    if target <= now:
+        target += timedelta(days=1)
+    return (target - now).total_seconds()
+
+async def bylaws_daily_job(hour=3, minute=17, run_immediately=False):
+    """
+    Executa bylaws.fetch_character uma vez por dia.
+    - hour/minute: horário do servidor (24h)
+    - run_immediately=True: roda uma vez agora ao subir o bot
+    """
+    if run_immediately:
+        try:
+            from bylaws.fetch_character import main as fetch_main
+            code = fetch_main()
+            print(f"[bylaws] job (imediato) terminou com código {code}")
+        except Exception as e:
+            print(f"[bylaws] erro inesperado (imediato): {e}")
+
+    # aguarda até o próximo HH:MM
+    await asyncio.sleep(_seconds_until(hour, minute))
+
+    while True:
+        try:
+            from bylaws.fetch_character import main as fetch_main
+            code = fetch_main()  # 0=ok/sem mudança, 2=site fora etc. (não explode)
+            print(f"[bylaws] job diário terminou com código {code}")
+        except Exception as e:
+            print(f"[bylaws] erro inesperado no job diário: {e}")
+        # espera 24h
+        await asyncio.sleep(24 * 60 * 60)
+# --- fim helpers agendamento ---
+
+
+
+
+
 @bot.event
 async def on_ready():
     print(f"🤖 Bot conectado como {bot.user}")
@@ -242,6 +286,13 @@ async def on_ready():
 
     # Dentro do on_ready, após os prints e sync:
     asyncio.create_task(iniciar_api_verificacao())
+
+    # Agenda o fetch/parse diário (03:17, hora do servidor). Evita agendar 2x em reconexões.
+    if not getattr(bot, "_bylaws_job_started", False):
+        asyncio.create_task(bylaws_daily_job(hour=3, minute=17, run_immediately=False))
+        bot._bylaws_job_started = True
+
+
 
 @bot.event
 async def on_guild_join(guild):
