@@ -4,6 +4,9 @@ aiosqlite>=0.19
 requests>=2.31
 python-dotenv>=1.0
 supabase>=2.5
+beautifulsoup4>=4.12
+lxml>=5.2
+
 
 # Windows/WSL: garante ZoneInfo
 tzdata>=2024.1

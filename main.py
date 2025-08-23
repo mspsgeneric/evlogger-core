@@ -274,6 +274,7 @@ async def load_commands():
     await bot.load_extension("comandos.arquivar_canal")
     await bot.load_extension("comandos.pptb")
     await bot.load_extension("comandos.ppt")
+    await bot.load_extension("comandos.blc_bylaws")
 
 async def main():
     await load_commands()

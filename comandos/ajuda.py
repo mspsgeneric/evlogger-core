@@ -60,7 +60,11 @@ async def setup(bot: commands.Bot):
                 "**/gerar_evlog**\n"
                 "Gera um arquivo `.evlog` com o conteúdo completo do canal atual.\n"
                 "Inclui mensagens, anexos e imagens incorporadas.\n"
-                "Use o programa **EVlogger Converter** para visualizar esse arquivo localmente com layout aprimorado."
+                "Use o programa **EVlogger Converter** para visualizar esse arquivo localmente com layout aprimorado.\n\n"
+                "**/blc (EXPERIMENTAL)**\n"
+                "Consulta ao Bylaws Character.\n"
+                "Dicas: use **aspas** para frases, `-termo` para excluir, filtros `pc:notify`, `npc:approval`, `coord:wraith`,\n"
+                "e `foo|bar` para OR. Exemplos: `\"true brujah\"`, `brujah 4`, `kiasyd -ritual`, `brujah|tremere pc:approval`."
             ),
             inline=False
         )
