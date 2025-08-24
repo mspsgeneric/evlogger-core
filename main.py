@@ -8,6 +8,8 @@ from logging.handlers import TimedRotatingFileHandler
 from datetime import datetime, timedelta
 import discord
 from aiohttp import web
+from painel.routes import setup_painel_routes
+
 
 # ===================== LOGGING =====================
 
@@ -35,6 +37,7 @@ if ENV == "dev":
     load_dotenv(".env.dev")
 else:
     load_dotenv()
+
 
 TEST_GUILD_ID = int(os.getenv("TEST_GUILD_ID", "0"))
 
@@ -255,11 +258,15 @@ async def on_ready():
         app = web.Application()
         app.router.add_post("/verificar_acesso", verificar_acesso)
 
+        # injeta o cliente supabase já criado no main
+        setup_painel_routes(app, supabase)
+
         runner = web.AppRunner(app)
         await runner.setup()
         site = web.TCPSite(runner, "0.0.0.0", 8937)
         await site.start()
-        print("🔐 API pública de verificação iniciada em http://0.0.0.0:8937")
+        print("🔐 API pública: http://0.0.0.0:8937/verificar_acesso")
+        print("🛠️ Painel admin: http://0.0.0.0:8937/admin/guilds")
 
     asyncio.create_task(iniciar_api_verificacao())
 
