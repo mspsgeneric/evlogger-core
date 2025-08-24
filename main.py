@@ -1,52 +1,42 @@
 import os
 import asyncio
-import csv
 from discord.ext import commands
 from discord import Intents
 from dotenv import load_dotenv
 import logging
 from logging.handlers import TimedRotatingFileHandler
-from datetime import datetime
+from datetime import datetime, timedelta
 import discord
-from datetime import timedelta  # você já importa datetime acima
+from aiohttp import web
 
-# Cria a pasta de logs se não existir
+# ===================== LOGGING =====================
+
 os.makedirs("logs", exist_ok=True)
-
-# Define o arquivo de log baseado no mês atual
 log_filename = f"logs/evlogger_{datetime.now().strftime('%Y-%m')}.log"
 
-# Configura o logger com rotação mensal e retenção de 24 arquivos (~2 anos)
 file_handler = TimedRotatingFileHandler(
     filename=log_filename,
     when="midnight",
     interval=30,
     backupCount=24,
-    encoding="utf-8"
+    encoding="utf-8",
 )
 
-# Aplica a configuração global de logging
 logging.basicConfig(
     level=logging.INFO,
     format='[%(asctime)s] %(levelname)s:%(name)s: %(message)s',
-    handlers=[
-        file_handler,
-        logging.StreamHandler()  # Mantém a exibição no tmux
-    ]
+    handlers=[file_handler, logging.StreamHandler()]
 )
 
-from aiohttp import web
+# ===================== AMBIENTE =====================
 
-# Carrega as variáveis de ambiente por ambiente (prod x dev)
 ENV = os.getenv("APP_ENV", "prod")
 if ENV == "dev":
     load_dotenv(".env.dev")
 else:
     load_dotenv()
-TEST_GUILD_ID = int(os.getenv("TEST_GUILD_ID", "0"))
 
-from util.supabase import get_supabase
-supabase = get_supabase()
+TEST_GUILD_ID = int(os.getenv("TEST_GUILD_ID", "0"))
 
 TOKEN = os.getenv("DISCORD_TOKEN")
 SUPABASE_URL = os.getenv("SUPABASE_URL")
@@ -55,23 +45,71 @@ BREVO_API_KEY = os.getenv("BREVO_API_KEY")
 MAIL_FROM = os.getenv("MAIL_FROM")
 MAIL_NAME = os.getenv("MAIL_NAME")
 
+# ===================== DISCORD BOT =====================
+
 intents = Intents.default()
 intents.message_content = True
+intents.guilds = True  # necessário para listar guilds e detectar rename
 
 bot = commands.Bot(command_prefix="!", intents=intents)
-from lembretes import setup
-setup(bot)
 
-# Lista de servidores autorizados (carregada do CSV)
-SERVIDORES_AUTORIZADOS = {}
+from lembretes import setup as setup_lembretes
+setup_lembretes(bot)
 
-# Fora da função, crie um cache simples por tempo curto (duração da execução):
 membro_cache = {}
 
-# ====== EVTranslator: helpers mínimos ======
+# ===================== SUPABASE =====================
+
+from util.supabase import get_supabase
+supabase = get_supabase()
+
+def _is_guild_registered(guild_id: int) -> bool:
+    """Existe linha para este guild_id? Se sim, está autorizado."""
+    try:
+        r = supabase.table("emails").select("guild_id").eq("guild_id", str(guild_id)).limit(1).execute()
+        return bool(r.data)
+    except Exception as e:
+        logging.warning(f"[supabase] erro ao consultar guild_id {guild_id}: {e}")
+        # por segurança, trate como não autorizado em caso de erro
+        return False
+
+def _update_guild_name_if_registered(guild: discord.Guild) -> bool:
+    """
+    Atualiza guild_name APENAS se o guild_id já existir.
+    Retorna True se existe (registrado), False se não existe.
+    """
+    try:
+        if _is_guild_registered(guild.id):
+            supabase.table("emails").update(
+                {"guild_name": guild.name}
+            ).eq("guild_id", str(guild.id)).execute()
+            return True
+        return False
+    except Exception as e:
+        logging.warning(f"[supabase] falha ao atualizar guild_name p/ {guild.id}: {e}")
+        return False
+
+def _bulk_update_guild_names_strict(bot_: commands.Bot) -> int:
+    """
+    Atualiza guild_name para todos os servidores atuais, SOMENTE se já existirem.
+    Retorna quantos foram atualizados.
+    """
+    updated = 0
+    for g in bot_.guilds:
+        try:
+            if _is_guild_registered(g.id):
+                supabase.table("emails").update(
+                    {"guild_name": g.name}
+                ).eq("guild_id", str(g.id)).execute()
+                updated += 1
+        except Exception as e:
+            logging.warning(f"[supabase] falha ao atualizar nome em bulk p/ {g.id}: {e}")
+    return updated
+
+# ===================== EVTranslator (helpers mínimos) =====================
+
 async def init_translator_runtime():
     """Inicializa recursos usados pelos cogs do EVTranslator (DB, sessão HTTP, semáforo)."""
-    # init DB do EVTranslator
     from evtranslator.config import DB_PATH, CONCURRENCY
     from evtranslator.db import init_db
     import aiohttp
@@ -91,7 +129,8 @@ async def load_translator_cogs():
     await bot.add_cog(RelayCog(bot))
     await bot.add_cog(EventsCog(bot))
     await bot.add_cog(Quota(bot))
-# ===========================================
+
+# ===================== API de verificação =====================
 
 async def verificar_acesso(request):
     try:
@@ -130,69 +169,9 @@ async def verificar_acesso(request):
         print(f"❌ Erro na verificação de acesso: {e}")
         return web.json_response({"acesso": False, "erro": str(e)})
 
-def carregar_servidores_autorizados():
-    global SERVIDORES_AUTORIZADOS
-    SERVIDORES_AUTORIZADOS.clear()
-
-    ids_autorizados = set()
-
-    try:
-        with open("servidores_autorizados.csv", newline='', encoding='utf-8') as csvfile:
-            leitor = csv.DictReader(csvfile)
-
-            for linha in leitor:
-                try:
-                    id_str = linha["id"].strip()
-                    nome = linha["nome"].strip()
-                    SERVIDORES_AUTORIZADOS[int(id_str)] = nome
-                    ids_autorizados.add(id_str)  # IDs como string
-                except ValueError:
-                    print(f"⚠️ ID inválido na linha: {linha}")
-
-            print(f"📄 IDs autorizados carregados do CSV: {ids_autorizados}")
-
-    except FileNotFoundError:
-        print("❌ Arquivo servidores_autorizados.csv não encontrado!")
-        return
-
-    # Buscar registros no Supabase
-    resposta = supabase.table("emails").select("guild_id").execute()
-    print(f"📦 Resposta bruta do Supabase: {resposta}")
-
-    if hasattr(resposta, "error") and resposta.error:
-        print(f"❌ Erro ao buscar registros do Supabase: {resposta.error}")
-        return
-
-    registros = resposta.data or []
-    print(f"🔍 Verificando registros do Supabase... Total: {len(registros)}")
-
-    if not registros:
-        print("⚠️ Nenhum registro encontrado no Supabase.")
-        return
-
-    # Obtem a lista de IDs do Supabase que devem ser mantidos
-    ids_a_manter = set(ids_autorizados)  # strings
-
-    # Itera sobre os registros do Supabase
-    for i, registro in enumerate(registros):
-        guild_id_supabase = str(registro.get("guild_id", "")).strip()
-        print(f"➡️ Registro {i}: {guild_id_supabase}")
-
-        if guild_id_supabase not in ids_a_manter:
-            print(f"🧹 Deletando: {guild_id_supabase}")
-            deletar = supabase.table("emails").delete().eq("guild_id", guild_id_supabase).execute()
-            if hasattr(deletar, "error") and deletar.error:
-                print(f"❌ Erro ao deletar {guild_id_supabase}: {deletar.error}")
-            else:
-                print(f"✅ Supabase: guild_id {guild_id_supabase} removido com sucesso")
-        else:
-            print(f"🔐 Supabase: guild_id {guild_id_supabase} autorizado — mantido.")
-
-# --- agendamento diário do fetch/parse de bylaws ---
-
+# ===================== JOB DIÁRIO (bylaws) =====================
 
 def _seconds_until(hour: int, minute: int) -> float:
-    """Segundos até a próxima ocorrência de HH:MM (hora do servidor)."""
     now = datetime.now()
     target = now.replace(hour=hour, minute=minute, second=0, microsecond=0)
     if target <= now:
@@ -200,11 +179,6 @@ def _seconds_until(hour: int, minute: int) -> float:
     return (target - now).total_seconds()
 
 async def bylaws_daily_job(hour=3, minute=17, run_immediately=False):
-    """
-    Executa bylaws.fetch_character uma vez por dia.
-    - hour/minute: horário do servidor (24h)
-    - run_immediately=True: roda uma vez agora ao subir o bot
-    """
     if run_immediately:
         try:
             from bylaws.fetch_character import main as fetch_main
@@ -213,28 +187,22 @@ async def bylaws_daily_job(hour=3, minute=17, run_immediately=False):
         except Exception as e:
             print(f"[bylaws] erro inesperado (imediato): {e}")
 
-    # aguarda até o próximo HH:MM
     await asyncio.sleep(_seconds_until(hour, minute))
 
     while True:
         try:
             from bylaws.fetch_character import main as fetch_main
-            code = fetch_main()  # 0=ok/sem mudança, 2=site fora etc. (não explode)
+            code = fetch_main()
             print(f"[bylaws] job diário terminou com código {code}")
         except Exception as e:
             print(f"[bylaws] erro inesperado no job diário: {e}")
-        # espera 24h
         await asyncio.sleep(24 * 60 * 60)
-# --- fim helpers agendamento ---
 
-
-
-
+# ===================== EVENTOS DO BOT =====================
 
 @bot.event
 async def on_ready():
     print(f"🤖 Bot conectado como {bot.user}")
-    carregar_servidores_autorizados()
 
     # Inicializa o WebhookSender usado pelo tradutor (somente após login)
     try:
@@ -247,33 +215,42 @@ async def on_ready():
     await asyncio.sleep(3)  # evita corridas no início com muitos servidores
 
     if ENV != "dev":
+        # 1) Atualiza NOME dos servidores cadastrados (modo estrito: só se já existirem)
+        def _run_bulk():
+            updated = _bulk_update_guild_names_strict(bot)
+            logging.info(f"[supabase] guild_name atualizado em {updated} servidores (modo estrito)")
+        await bot.loop.run_in_executor(None, _run_bulk)
+
+        # 2) Sai de servidores que não têm registro no Supabase
         for guild in bot.guilds:
-            if guild.id not in SERVIDORES_AUTORIZADOS:
-                print(f"🚫 Servidor não autorizado: {guild.name} ({guild.id}) — Saindo...")
+            def _check():
+                return _is_guild_registered(guild.id)
+            ok = await bot.loop.run_in_executor(None, _check)
+            if not ok:
+                print(f"🚫 Sem registro no Supabase: {guild.name} ({guild.id}) — Saindo...")
                 try:
                     await guild.leave()
                 except Exception as e:
                     print(f"⚠️ Erro ao sair de {guild.name}: {e}")
             else:
-                print(f"✅ Conectado ao servidor autorizado: {guild.name} ({guild.id})")
+                print(f"✅ Autorizado (Supabase): {guild.name} ({guild.id})")
     else:
-        print("🔧 DEV: pulando checagem de servidores autorizados.")
+        print("🔧 DEV: pulando checagem de servidores autorizados (Supabase).")
 
+    # Sync de comandos
     try:
         if ENV == "dev" and TEST_GUILD_ID:
             guild = discord.Object(id=TEST_GUILD_ID)
-            # 👇 copia os comandos globais carregados pelos cogs para o servidor de teste
             bot.tree.copy_global_to(guild=guild)
-            # 👇 sincroniza no guild (aparece na hora)
             synced = await bot.tree.sync(guild=guild)
             print(f"📤 {len(synced)} comandos de barra (DEV) sincronizados no guild {TEST_GUILD_ID}.")
         else:
-            # produção: sync global (pode levar alguns minutos até 1h para propagar no Discord)
             synced = await bot.tree.sync()
             print(f"📤 {len(synced)} comandos de barra sincronizados globalmente.")
     except Exception as e:
         print(f"⚠️ Erro ao sincronizar comandos: {e}")
 
+    # API de verificação
     async def iniciar_api_verificacao():
         app = web.Application()
         app.router.add_post("/verificar_acesso", verificar_acesso)
@@ -284,35 +261,63 @@ async def on_ready():
         await site.start()
         print("🔐 API pública de verificação iniciada em http://0.0.0.0:8937")
 
-    # Dentro do on_ready, após os prints e sync:
     asyncio.create_task(iniciar_api_verificacao())
 
-    # Agenda o fetch/parse diário (03:17, hora do servidor). Evita agendar 2x em reconexões.
+    # Agenda o fetch/parse diário (03:17)
     if not getattr(bot, "_bylaws_job_started", False):
         asyncio.create_task(bylaws_daily_job(hour=3, minute=17, run_immediately=False))
         bot._bylaws_job_started = True
 
-
-
 @bot.event
 async def on_guild_join(guild):
     print(f"📥 Bot foi adicionado ao servidor: {guild.name} ({guild.id})")
-    carregar_servidores_autorizados()
 
-    if guild.id not in SERVIDORES_AUTORIZADOS:
-        print(f"🚫 Servidor não autorizado (on_guild_join): {guild.name} ({guild.id}) — Saindo...")
+    # MODO ESTRITO:
+    # 1) Checa se existe registro; 2) se existir, atualiza o nome; 3) se não, sai.
+    def _check_and_update():
+        if _is_guild_registered(guild.id):
+            try:
+                supabase.table("emails").update(
+                    {"guild_name": guild.name}
+                ).eq("guild_id", str(guild.id)).execute()
+            except Exception as e:
+                logging.warning(f"[supabase] falha ao atualizar nome no join p/ {guild.id}: {e}")
+            return True
+        return False
+
+    ok = await bot.loop.run_in_executor(None, _check_and_update)
+
+    if not ok:
+        print(f"🚫 Sem registro no Supabase (on_guild_join): {guild.name} ({guild.id}) — Saindo...")
         try:
             owner = await bot.fetch_user(guild.owner_id)
             await owner.send(
                 f"❌ O bot **{bot.user.name}** não está autorizado para uso neste servidor.\n"
-                f"Se você acredita que isso é um erro, entre em contato com o administrador."
+                f"Peça ao administrador para cadastrar o **guild_id** `{guild.id}` no painel."
             )
         except Exception as e:
             print(f"⚠️ Não foi possível enviar DM ao dono do servidor: {e}")
-
         await guild.leave()
     else:
-        print(f"✅ Novo servidor autorizado: {guild.name} ({guild.id})")
+        print(f"✅ Novo servidor autorizado (Supabase): {guild.name} ({guild.id})")
+
+@bot.event
+async def on_guild_update(before: discord.Guild, after: discord.Guild):
+    # Mantém guild_name sincronizado apenas se já houver registro (modo estrito)
+    if before.name != after.name:
+        def _update_if_registered():
+            if _is_guild_registered(after.id):
+                try:
+                    supabase.table("emails").update({"guild_name": after.name}).eq("guild_id", str(after.id)).execute()
+                    return True
+                except Exception as e:
+                    logging.warning(f"[supabase] falha ao atualizar nome p/ {after.id}: {e}")
+            return False
+        changed = await bot.loop.run_in_executor(None, _update_if_registered)
+        if changed:
+            logging.info(f"[supabase] guild_name sincronizado: {before.name} -> {after.name} ({after.id})")
+
+# ===================== COMANDOS / COGS =====================
 
 async def load_commands():
     await bot.load_extension("comandos.definir_email")
@@ -328,6 +333,8 @@ async def load_commands():
     await bot.load_extension("comandos.blc_bylaws")
     await bot.load_extension("comandos.check")
 
+# ===================== MAIN =====================
+
 async def main():
     await load_commands()
     # ====== EVTranslator: inicializa runtime + registra cogs ======
@@ -337,7 +344,6 @@ async def main():
     try:
         await bot.start(TOKEN)
     finally:
-        # encerra sessão HTTP do tradutor com elegância (se criada)
         session = getattr(bot, "http_session", None)
         if session is not None and not session.closed:
             await session.close()

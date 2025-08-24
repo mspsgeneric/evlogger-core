@@ -8,7 +8,7 @@ import logging
 from logging.handlers import TimedRotatingFileHandler
 from datetime import datetime
 import discord
-
+from datetime import timedelta  # você já importa datetime acima
 
 # Cria a pasta de logs se não existir
 os.makedirs("logs", exist_ok=True)
@@ -37,7 +37,6 @@ logging.basicConfig(
 
 from aiohttp import web
 
-
 # Carrega as variáveis de ambiente por ambiente (prod x dev)
 ENV = os.getenv("APP_ENV", "prod")
 if ENV == "dev":
@@ -45,7 +44,6 @@ if ENV == "dev":
 else:
     load_dotenv()
 TEST_GUILD_ID = int(os.getenv("TEST_GUILD_ID", "0"))
-
 
 from util.supabase import get_supabase
 supabase = get_supabase()
@@ -64,13 +62,36 @@ bot = commands.Bot(command_prefix="!", intents=intents)
 from lembretes import setup
 setup(bot)
 
-
 # Lista de servidores autorizados (carregada do CSV)
 SERVIDORES_AUTORIZADOS = {}
 
-
 # Fora da função, crie um cache simples por tempo curto (duração da execução):
 membro_cache = {}
+
+# ====== EVTranslator: helpers mínimos ======
+async def init_translator_runtime():
+    """Inicializa recursos usados pelos cogs do EVTranslator (DB, sessão HTTP, semáforo)."""
+    # init DB do EVTranslator
+    from evtranslator.config import DB_PATH, CONCURRENCY
+    from evtranslator.db import init_db
+    import aiohttp
+
+    await init_db(DB_PATH)
+    bot.sem = asyncio.Semaphore(CONCURRENCY)
+    bot.http_session = aiohttp.ClientSession(headers={"User-Agent": "Mozilla/5.0"})
+
+async def load_translator_cogs():
+    """Registra os cogs do EVTranslator sem mexer na arquitetura do EVLogger."""
+    from evtranslator.cogs.links import LinksCog
+    from evtranslator.cogs.relay import RelayCog
+    from evtranslator.cogs.events import EventsCog
+    from evtranslator.cogs.quota import Quota
+
+    await bot.add_cog(LinksCog(bot))
+    await bot.add_cog(RelayCog(bot))
+    await bot.add_cog(EventsCog(bot))
+    await bot.add_cog(Quota(bot))
+# ===========================================
 
 async def verificar_acesso(request):
     try:
@@ -108,10 +129,6 @@ async def verificar_acesso(request):
     except Exception as e:
         print(f"❌ Erro na verificação de acesso: {e}")
         return web.json_response({"acesso": False, "erro": str(e)})
-
-
-
-
 
 def carregar_servidores_autorizados():
     global SERVIDORES_AUTORIZADOS
@@ -171,11 +188,61 @@ def carregar_servidores_autorizados():
         else:
             print(f"🔐 Supabase: guild_id {guild_id_supabase} autorizado — mantido.")
 
+# --- agendamento diário do fetch/parse de bylaws ---
+
+
+def _seconds_until(hour: int, minute: int) -> float:
+    """Segundos até a próxima ocorrência de HH:MM (hora do servidor)."""
+    now = datetime.now()
+    target = now.replace(hour=hour, minute=minute, second=0, microsecond=0)
+    if target <= now:
+        target += timedelta(days=1)
+    return (target - now).total_seconds()
+
+async def bylaws_daily_job(hour=3, minute=17, run_immediately=False):
+    """
+    Executa bylaws.fetch_character uma vez por dia.
+    - hour/minute: horário do servidor (24h)
+    - run_immediately=True: roda uma vez agora ao subir o bot
+    """
+    if run_immediately:
+        try:
+            from bylaws.fetch_character import main as fetch_main
+            code = fetch_main()
+            print(f"[bylaws] job (imediato) terminou com código {code}")
+        except Exception as e:
+            print(f"[bylaws] erro inesperado (imediato): {e}")
+
+    # aguarda até o próximo HH:MM
+    await asyncio.sleep(_seconds_until(hour, minute))
+
+    while True:
+        try:
+            from bylaws.fetch_character import main as fetch_main
+            code = fetch_main()  # 0=ok/sem mudança, 2=site fora etc. (não explode)
+            print(f"[bylaws] job diário terminou com código {code}")
+        except Exception as e:
+            print(f"[bylaws] erro inesperado no job diário: {e}")
+        # espera 24h
+        await asyncio.sleep(24 * 60 * 60)
+# --- fim helpers agendamento ---
+
+
+
+
 
 @bot.event
 async def on_ready():
     print(f"🤖 Bot conectado como {bot.user}")
     carregar_servidores_autorizados()
+
+    # Inicializa o WebhookSender usado pelo tradutor (somente após login)
+    try:
+        if not hasattr(bot, "webhooks") or getattr(bot, "webhooks", None) is None:
+            from evtranslator.webhook import WebhookSender
+            bot.webhooks = WebhookSender(bot_user_id=bot.user.id)  # type: ignore[attr-defined]
+    except Exception as e:
+        logging.warning(f"Falha ao inicializar WebhookSender: {e}")
 
     await asyncio.sleep(3)  # evita corridas no início com muitos servidores
 
@@ -192,7 +259,6 @@ async def on_ready():
     else:
         print("🔧 DEV: pulando checagem de servidores autorizados.")
 
-    
     try:
         if ENV == "dev" and TEST_GUILD_ID:
             guild = discord.Object(id=TEST_GUILD_ID)
@@ -208,8 +274,6 @@ async def on_ready():
     except Exception as e:
         print(f"⚠️ Erro ao sincronizar comandos: {e}")
 
-
-
     async def iniciar_api_verificacao():
         app = web.Application()
         app.router.add_post("/verificar_acesso", verificar_acesso)
@@ -222,6 +286,11 @@ async def on_ready():
 
     # Dentro do on_ready, após os prints e sync:
     asyncio.create_task(iniciar_api_verificacao())
+
+    # Agenda o fetch/parse diário (03:17, hora do servidor). Evita agendar 2x em reconexões.
+    if not getattr(bot, "_bylaws_job_started", False):
+        asyncio.create_task(bylaws_daily_job(hour=3, minute=17, run_immediately=False))
+        bot._bylaws_job_started = True
 
 
 
@@ -245,7 +314,6 @@ async def on_guild_join(guild):
     else:
         print(f"✅ Novo servidor autorizado: {guild.name} ({guild.id})")
 
-
 async def load_commands():
     await bot.load_extension("comandos.definir_email")
     await bot.load_extension("comandos.mostrar_email")
@@ -254,14 +322,25 @@ async def load_commands():
     await bot.load_extension("comandos.ajuda")
     await bot.load_extension("comandos.obter_log")
     await bot.load_extension("comandos.gerar_evlog")
+    await bot.load_extension("comandos.arquivar_canal")
     await bot.load_extension("comandos.pptb")
     await bot.load_extension("comandos.ppt")
-
-
+    await bot.load_extension("comandos.blc_bylaws")
+    await bot.load_extension("comandos.check")
 
 async def main():
     await load_commands()
-    await bot.start(TOKEN)
+    # ====== EVTranslator: inicializa runtime + registra cogs ======
+    await init_translator_runtime()
+    await load_translator_cogs()
+    # =============================================================
+    try:
+        await bot.start(TOKEN)
+    finally:
+        # encerra sessão HTTP do tradutor com elegância (se criada)
+        session = getattr(bot, "http_session", None)
+        if session is not None and not session.closed:
+            await session.close()
 
 if __name__ == "__main__":
     asyncio.run(main())
