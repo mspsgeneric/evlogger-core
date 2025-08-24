@@ -2,6 +2,8 @@ from discord import app_commands
 from discord.ext import commands
 import discord
 
+ALLOWED_NONE = discord.AllowedMentions.none()
+
 async def setup(bot: commands.Bot):
     @bot.tree.command(name="ajuda", description="Mostra todos os comandos disponíveis do EVlogger.")
     async def ajuda(interaction: discord.Interaction):
@@ -31,10 +33,15 @@ async def setup(bot: commands.Bot):
         )
 
         embed.add_field(
-            name="👥 Comando para jogadores",
+            name="👥 Comandos para jogadores",
             value=(
                 "**/obter_log**\n"
-                "Envia por DM o log da cena atual (em `.txt`). Pode ser usado por qualquer membro com permissão de leitura no canal."
+                "Envia por DM o log da cena atual (em `.txt`). Pode ser usado por qualquer membro com permissão de leitura no canal.\n"
+                "• A retirada é registrada **no próprio canal** de forma **anônima** (sem expor quem pediu).\n\n"
+                "**/check**\n"
+                "Mostra **só para você** as datas e horas em que **você** baixou o log **neste canal**.\n"
+                "• Não revela retiradas de outras pessoas.\n"
+                "• Se você ainda não retirou nenhum log deste canal, o bot informa isso claramente."
             ),
             inline=False
         )
@@ -70,4 +77,4 @@ async def setup(bot: commands.Bot):
         )
 
         embed.set_footer(text="Dúvidas ou sugestões? Fale com o criador do bot.")
-        await interaction.response.send_message(embed=embed, ephemeral=True)
+        await interaction.response.send_message(embed=embed, ephemeral=True, allowed_mentions=ALLOWED_NONE)
