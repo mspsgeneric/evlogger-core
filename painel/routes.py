@@ -28,6 +28,7 @@ html, body {{ margin:0; padding:0; background:var(--bg); color:var(--text); font
 h1 {{ font-size: 20px; font-weight: 700; margin: 0 0 16px; }}
 .card {{ background: var(--bg-elev); border:1px solid var(--border); border-radius: 12px; padding: 16px; }}
 
+/* Listagem / ações */
 .controls {{ display:flex; gap:8px; align-items:center; margin-bottom:12px; }}
 .controls .search {{ flex:1; display:flex; gap:8px; }}
 input[type=text], input[type=number] {{ background:#1e1f22; color:var(--text); border:1px solid var(--border); border-radius:8px; padding:10px 12px; width:100%; }}
@@ -39,19 +40,30 @@ button {{ font: inherit; }}
 .btn:hover {{ filter: brightness(1.05); }}
 form.inline {{ display:inline; }}
 
+/* Tabela */
 .table-wrap {{ width:100%; overflow-x:auto; }}
 table {{ width:100%; border-collapse: collapse; overflow: hidden; border-radius: 12px; min-width: 780px; }}
 thead th {{ background: var(--bg-elev-2); font-weight:600; font-size:12px; letter-spacing:.3px; text-align:left; padding:10px; border-bottom:1px solid var(--border); white-space:nowrap; }}
 tbody td {{ padding:10px; border-bottom:1px solid var(--border); vertical-align: middle; }}
 
+/* Badges */
 .badge {{ display:inline-block; padding:2px 8px; border-radius:999px; font-size:12px; line-height: 18px; }}
 .badge.on {{ background: rgba(35,165,90,.15); color: var(--success); border:1px solid rgba(35,165,90,.35); }}
 .badge.off{{ background: rgba(242,63,67,.15); color: var(--danger);  border:1px solid rgba(242,63,67,.35); }}
 
+/* Barra de uso */
 .progress {{ position: relative; width: 160px; height: 8px; background:#202226; border-radius:999px; overflow:hidden; border:1px solid var(--border); }}
 .progress > span {{ position:absolute; inset:0; width: var(--w,0%); background: linear-gradient(90deg, #4e5de2, #5865F2); }}
 .small {{ color: var(--muted); font-size: 12px; }}
 hr {{ border:0; border-top:1px solid var(--border); margin: 12px 0; }}
+
+/* ====== Form (novo/editar) ====== */
+.form {{ display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }}
+.form label {{ display: flex; flex-direction: column; gap: 6px; }}
+.form .full {{ grid-column: 1 / -1; }}
+.form .checkbox {{ flex-direction: row; align-items: center; gap: 8px; }}
+.form .actions {{ display: flex; gap: 8px; flex-wrap: wrap; }}
+.form .actions .btn {{ flex: 1; text-align: center; }}
 
 /* ====== Mobile layout ====== */
 @media (max-width: 820px) {{
@@ -59,7 +71,7 @@ hr {{ border:0; border-top:1px solid var(--border); margin: 12px 0; }}
   .controls .search {{ width:100%; }}
   .controls .btn.primary {{ width:100%; justify-content:center; }}
 
-  /* Tabela vira cards */
+  /* Tabela -> cards */
   table, thead, tbody, th, tr, td {{ display:block; min-width: 0; }}
   thead {{ display:none; }}
   tbody tr {{ border:1px solid var(--border); border-radius:12px; margin-bottom:12px; background: var(--bg-elev); }}
@@ -73,6 +85,9 @@ hr {{ border:0; border-top:1px solid var(--border); margin: 12px 0; }}
   }}
   .progress {{ width: 100%; }}
   .table-wrap {{ overflow: visible; }}
+
+  /* Form em 1 coluna */
+  .form {{ grid-template-columns: 1fr; }}
 }}
 </style>
 </head>
@@ -157,14 +172,30 @@ def setup_painel_routes(app: web.Application, supabase):
     async def admin_guilds_new_get(request: web.Request):
         require_auth(request)
         body = """
-<form method="post">
-  <label>guild_id*<br><input name="guild_id" required></label>
-  <label>Nome (opcional)<br><input name="guild_name"></label>
-  <label><input type="checkbox" name="translate_enabled"> Habilitar tradutor</label>
-  <label>Limite de caracteres<br><input name="char_limit" type="number" value="500000"></label>
-  <div style="margin-top:12px; display:flex; gap:8px; flex-wrap:wrap;">
-    <button class="btn primary" type="submit" style="flex:1">Salvar</button>
-    <a class="btn secondary" href="/admin/guilds" style="flex:1; text-align:center">Voltar</a>
+<form method="post" class="form">
+  <label>
+    <span>guild_id*</span>
+    <input name="guild_id" required placeholder="ex.: 123456789012345678">
+  </label>
+
+  <label>
+    <span>Nome (opcional)</span>
+    <input name="guild_name" placeholder="ex.: Meu Servidor">
+  </label>
+
+  <label class="checkbox full">
+    <input type="checkbox" name="translate_enabled">
+    <span>Habilitar tradutor</span>
+  </label>
+
+  <label class="full">
+    <span>Limite de caracteres</span>
+    <input name="char_limit" type="number" value="500000" min="0" step="1">
+  </label>
+
+  <div class="actions full" style="margin-top:4px;">
+    <button class="btn primary" type="submit">Salvar</button>
+    <a class="btn secondary" href="/admin/guilds">Voltar</a>
   </div>
 </form>
 """
@@ -177,7 +208,6 @@ def setup_painel_routes(app: web.Application, supabase):
         gid = (data.get("guild_id") or "").strip()
         if not gid:
             return _html("Erro", "<p>guild_id é obrigatório.</p><p><a class='btn' href='/admin/guilds/new'>Voltar</a></p>")
-        # opcional: validar numérico → if not gid.isdigit(): ...
 
         payload = {
             "guild_id": gid,
@@ -206,19 +236,36 @@ def setup_painel_routes(app: web.Application, supabase):
         pct = 0 if limit_ <= 0 else min(100, int(used * 100 / max(1, limit_)))
         checked = "checked" if row.get("translate_enabled") else ""
         body = f"""
-<form method="post">
-  <p><b>guild_id:</b> {row.get('guild_id')}</p>
-  <label>Nome<br><input name="guild_name" value="{row.get('guild_name') or ''}"></label>
-  <label><input type="checkbox" name="translate_enabled" {checked}> Habilitar tradutor</label>
-  <label>Limite de caracteres<br><input name="char_limit" type="number" value="{limit_}"></label>
-  <div style="margin-top:8px">
-    <div class="small" style="margin-bottom:6px"><b>Carac. Usados</b></div>
+<form method="post" class="form">
+  <label class="full">
+    <span>guild_id</span>
+    <input value="{row.get('guild_id')}" disabled>
+  </label>
+
+  <label>
+    <span>Nome</span>
+    <input name="guild_name" value="{row.get('guild_name') or ''}">
+  </label>
+
+  <label class="checkbox">
+    <input type="checkbox" name="translate_enabled" {checked}>
+    <span>Habilitar tradutor</span>
+  </label>
+
+  <label class="full">
+    <span>Limite de caracteres</span>
+    <input name="char_limit" type="number" value="{limit_}" min="0" step="1">
+  </label>
+
+  <label class="full">
+    <span>Carac. Usados</span>
     <div class="progress" style="--w:{pct}%"><span></span></div>
     <div class="small">{used:,} / {limit_:,} ({pct}%)</div>
-  </div>
-  <div style="margin-top:12px; display:flex; gap:8px; flex-wrap:wrap;">
-    <button class="btn primary" type="submit" style="flex:1">Salvar</button>
-    <a class="btn secondary" href="/admin/guilds" style="flex:1; text-align:center">Voltar</a>
+  </label>
+
+  <div class="actions full" style="margin-top:4px;">
+    <button class="btn primary" type="submit">Salvar</button>
+    <a class="btn secondary" href="/admin/guilds">Voltar</a>
   </div>
 </form>
 """
