@@ -32,9 +32,9 @@ class EscolhaDM(discord.ui.View):
         self.opcoes = opcoes
         self.escolha: str | None = None
 
-        # Remove botão de bomba se não for permitido
+        # remove botão de bomba se não for permitido
         if "bomba" not in self.opcoes:
-            for c in self.children:
+            for c in list(self.children):
                 if isinstance(c, discord.ui.Button) and c.label == "Bomba":
                     self.remove_item(c)
 
@@ -77,7 +77,7 @@ class EscolhaDM(discord.ui.View):
 class Duelo(commands.Cog):
     def __init__(self, bot: commands.Bot):
         self.bot = bot
-        self.partidas = {}  # {id_interaction: {"j1":..., "j2":..., "escolhas":{user_id:(jogada,aleatorio)}}}
+        self.partidas = {}
 
     def finalizar_jogada(self, user_id: int, jogada: str, aleatorio: bool = False):
         for partida in self.partidas.values():
@@ -91,16 +91,16 @@ class Duelo(commands.Cog):
     @app_commands.describe(
         jogador1="Jogador 1",
         jogador2="Jogador 2",
-        jogador1_b="Digite 'b' se o Jogador 1 pode usar bomba",
-        jogador2_b="Digite 'b' se o Jogador 2 pode usar bomba",
+        jogador1_b="Jogador 1 pode usar bomba?",
+        jogador2_b="Jogador 2 pode usar bomba?",
     )
     async def duelo(
         self,
         interaction: discord.Interaction,
         jogador1: discord.User,
         jogador2: discord.User,
-        jogador1_b: str = "",
-        jogador2_b: str = "",
+        jogador1_b: bool = False,
+        jogador2_b: bool = False,
     ):
         if jogador1.id == jogador2.id:
             await interaction.response.send_message("⚠️ Os jogadores devem ser diferentes.", ephemeral=True)
@@ -113,11 +113,11 @@ class Duelo(commands.Cog):
             f"🎮 Duelo iniciado entre {jogador1.mention} e {jogador2.mention}! Jogadas serão escolhidas por DM."
         )
 
-        # opções de cada jogador
-        opcoes_j1 = OPCOES_PPTB if jogador1_b.lower() == "b" else OPCOES_PPT
-        opcoes_j2 = OPCOES_PPTB if jogador2_b.lower() == "b" else OPCOES_PPT
+        # opções por jogador
+        opcoes_j1 = OPCOES_PPTB if jogador1_b else OPCOES_PPT
+        opcoes_j2 = OPCOES_PPTB if jogador2_b else OPCOES_PPT
 
-        # Envia DMs
+        # envia DM para cada um
         for jogador, opcoes, outro in (
             (jogador1, opcoes_j1, jogador2),
             (jogador2, opcoes_j2, jogador1),
@@ -134,7 +134,7 @@ class Duelo(commands.Cog):
         # espera 60s
         await asyncio.sleep(60)
 
-        # resolve duelo (preenche com aleatório quem não jogou)
+        # resolve duelo (aleatório se não jogou)
         jog1, ale1 = partida["escolhas"].get(jogador1.id, (randchoice(opcoes_j1), True))
         jog2, ale2 = partida["escolhas"].get(jogador2.id, (randchoice(opcoes_j2), True))
 
