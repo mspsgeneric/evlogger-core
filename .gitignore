@@ -1,6 +1,6 @@
 .env
 config.json
-*.sqlite3
+*.sqlite*
 __pycache__/
 *.log
 venv/
