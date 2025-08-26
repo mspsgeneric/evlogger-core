@@ -1,5 +1,6 @@
 # comandos/duelo.py
 from secrets import choice as randchoice
+import asyncio
 import discord
 from discord import app_commands
 from discord.ext import commands
@@ -101,7 +102,7 @@ class Duelo(commands.Cog):
                 await interaction.followup.send(f"❌ Não consegui enviar DM para {jogador.mention}.", ephemeral=True)
 
         # espera 60s
-        await discord.utils.sleep_until(discord.utils.utcnow() + discord.utils.timedelta(seconds=60))
+        await asyncio.sleep(60)
 
         # resolve duelo (preenche com aleatório quem não jogou)
         jog1, ale1 = partida["escolhas"].get(jogador1.id, (randchoice(OPCOES_PPTB), True))
