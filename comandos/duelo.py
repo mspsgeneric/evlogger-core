@@ -91,17 +91,17 @@ class Duelo(commands.Cog):
     @app_commands.describe(
         jogador1="Jogador 1",
         jogador2="Jogador 2",
-        jogador1_b="Permitir bomba para Jogador 1",
-        jogador2_b="Permitir bomba para Jogador 2",
+        pc1_bomba="PC 1 pode usar bomba?",
+        pc2_bomba="PC 2 pode usar bomba?",
     )
     @app_commands.choices(
-        jogador1_b=[
-            app_commands.Choice(name="💣 Bomba", value="bomba"),
+        pc1_bomba=[
             app_commands.Choice(name="🚫 Sem bomba", value="sem"),
+            app_commands.Choice(name="💣 Com bomba", value="bomba"),
         ],
-        jogador2_b=[
-            app_commands.Choice(name="💣 Bomba", value="bomba"),
+        pc2_bomba=[
             app_commands.Choice(name="🚫 Sem bomba", value="sem"),
+            app_commands.Choice(name="💣 Com bomba", value="bomba"),
         ],
     )
     async def duelo(
@@ -109,8 +109,8 @@ class Duelo(commands.Cog):
         interaction: discord.Interaction,
         jogador1: discord.User,
         jogador2: discord.User,
-        jogador1_b: app_commands.Choice[str] = None,
-        jogador2_b: app_commands.Choice[str] = None,
+        pc1_bomba: app_commands.Choice[str] = None,
+        pc2_bomba: app_commands.Choice[str] = None,
     ):
         if jogador1.id == jogador2.id:
             await interaction.response.send_message("⚠️ Os jogadores devem ser diferentes.", ephemeral=True)
@@ -124,8 +124,8 @@ class Duelo(commands.Cog):
         )
 
         # usa "sem" como default se for None
-        j1_b = jogador1_b.value if jogador1_b else "sem"
-        j2_b = jogador2_b.value if jogador2_b else "sem"
+        j1_b = pc1_bomba.value if pc1_bomba else "sem"
+        j2_b = pc2_bomba.value if pc2_bomba else "sem"
 
         opcoes_j1 = OPCOES_PPTB if j1_b == "bomba" else OPCOES_PPT
         opcoes_j2 = OPCOES_PPTB if j2_b == "bomba" else OPCOES_PPT
