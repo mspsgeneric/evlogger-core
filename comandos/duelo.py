@@ -109,8 +109,8 @@ class Duelo(commands.Cog):
         interaction: discord.Interaction,
         jogador1: discord.User,
         jogador2: discord.User,
-        jogador1_b: app_commands.Choice[str] = app_commands.Choice(name="🚫 Sem bomba", value="sem"),
-        jogador2_b: app_commands.Choice[str] = app_commands.Choice(name="🚫 Sem bomba", value="sem"),
+        jogador1_b: app_commands.Choice[str] = None,
+        jogador2_b: app_commands.Choice[str] = None,
     ):
         if jogador1.id == jogador2.id:
             await interaction.response.send_message("⚠️ Os jogadores devem ser diferentes.", ephemeral=True)
@@ -123,11 +123,14 @@ class Duelo(commands.Cog):
             f"🎮 Duelo iniciado entre {jogador1.mention} e {jogador2.mention}! Jogadas serão escolhidas por DM."
         )
 
-        # opções de cada jogador (default = sem bomba)
-        opcoes_j1 = OPCOES_PPTB if (jogador1_b and jogador1_b.value == "bomba") else OPCOES_PPT
-        opcoes_j2 = OPCOES_PPTB if (jogador2_b and jogador2_b.value == "bomba") else OPCOES_PPT
+        # usa "sem" como default se for None
+        j1_b = jogador1_b.value if jogador1_b else "sem"
+        j2_b = jogador2_b.value if jogador2_b else "sem"
 
-        # envia DM para cada um
+        opcoes_j1 = OPCOES_PPTB if j1_b == "bomba" else OPCOES_PPT
+        opcoes_j2 = OPCOES_PPTB if j2_b == "bomba" else OPCOES_PPT
+
+        # envia DM para cada jogador
         for jogador, opcoes, outro in (
             (jogador1, opcoes_j1, jogador2),
             (jogador2, opcoes_j2, jogador1),
