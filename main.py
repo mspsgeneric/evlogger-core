@@ -339,8 +339,8 @@ async def load_commands():
     await bot.load_extension("comandos.ppt")
     await bot.load_extension("comandos.blc_bylaws")
     await bot.load_extension("comandos.check")
-    await bot.load_extension("comandos.xpptb")
     await bot.load_extension("comandos.duelo")
+    await bot.load_extension("comandos.pptbd")
 
 # ===================== MAIN =====================
 

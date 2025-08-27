@@ -1,10 +1,10 @@
-# comandos/xpptb.py
+# comandos/pptbd.py
 from secrets import choice as randchoice
 import discord
 from discord import app_commands
 from discord.ext import commands
 
-# mesmas opções e lógica do pptb
+# opções e lógica
 OPCOES_PPT = ("pedra", "papel", "tesoura")
 OPCOES_PPTB = ("pedra", "papel", "tesoura", "bomba")
 
@@ -14,7 +14,7 @@ WINS = {
     "tesoura": {"papel", "bomba"},
     "bomba":   {"pedra", "papel"},
 }
-EMOJI = {"pedra":"🪨","papel":"📄","tesoura":"✂️","bomba":"💣"}
+EMOJI = {"pedra": "🪨", "papel": "📄", "tesoura": "✂️", "bomba": "💣"}
 
 def resultado(a: str, b: str) -> str:
     if a == b:
@@ -25,35 +25,48 @@ def resultado(a: str, b: str) -> str:
         return "jogador2"
     return "empate"
 
-class XPPTB(commands.Cog):
+class PPTBD(commands.Cog):
     def __init__(self, bot: commands.Bot):
         self.bot = bot
 
     @app_commands.command(
-        name="xpptb",
-        description="PvP de Pedra, Papel, Tesoura (com opção de Bomba)."
+        name="pptbd",
+        description="Duelo rápido de Pedra, Papel, Tesoura (com opção de Bomba)."
     )
     @app_commands.describe(
         jogador1="Jogador 1",
-        opcao1="Digite 'b' para incluir bomba (ou deixe vazio)",
         jogador2="Jogador 2",
-        opcao2="Digite 'b' para incluir bomba (ou deixe vazio)",
+        pc1_bomba="PC 1 pode usar bomba?",
+        pc2_bomba="PC 2 pode usar bomba?",
     )
-    async def xpptb(
+    @app_commands.choices(
+        pc1_bomba=[
+            app_commands.Choice(name="🚫 Sem bomba", value="sem"),
+            app_commands.Choice(name="💣 Com bomba", value="bomba"),
+        ],
+        pc2_bomba=[
+            app_commands.Choice(name="🚫 Sem bomba", value="sem"),
+            app_commands.Choice(name="💣 Com bomba", value="bomba"),
+        ],
+    )
+    async def pptbd(
         self,
         interaction: discord.Interaction,
         jogador1: discord.User,
-        opcao1: str = "",
-        jogador2: discord.User = None,
-        opcao2: str = "",
+        jogador2: discord.User,
+        pc1_bomba: app_commands.Choice[str] = None,
+        pc2_bomba: app_commands.Choice[str] = None,
     ):
-        if jogador2 is None:
-            await interaction.response.send_message("⚠️ Você precisa escolher o Jogador 2!", ephemeral=True)
+        if jogador1.id == jogador2.id:
+            await interaction.response.send_message("⚠️ Os jogadores devem ser diferentes.", ephemeral=True)
             return
 
-        # monta opções para cada jogador
-        opcoes_j1 = OPCOES_PPTB if opcao1.lower() == "b" else OPCOES_PPT
-        opcoes_j2 = OPCOES_PPTB if opcao2.lower() == "b" else OPCOES_PPT
+        # usa "sem" como default se não selecionado
+        j1_b = pc1_bomba.value if pc1_bomba else "sem"
+        j2_b = pc2_bomba.value if pc2_bomba else "sem"
+
+        opcoes_j1 = OPCOES_PPTB if j1_b == "bomba" else OPCOES_PPT
+        opcoes_j2 = OPCOES_PPTB if j2_b == "bomba" else OPCOES_PPT
 
         # sorteios
         jogada1 = randchoice(opcoes_j1)
@@ -77,4 +90,4 @@ class XPPTB(commands.Cog):
         await interaction.response.send_message(texto)
 
 async def setup(bot: commands.Bot):
-    await bot.add_cog(XPPTB(bot))
+    await bot.add_cog(PPTBD(bot))

@@ -9,7 +9,7 @@ async def setup(bot: commands.Bot):
     async def ajuda(interaction: discord.Interaction):
         embed = discord.Embed(
             title="📘 Comandos do EVlogger",
-            description="Ferramentas para registrar, exportar e limpar cenas — e testes rápidos de jogada.",
+            description="Ferramentas para registrar, exportar e limpar cenas — e mini-jogos rápidos.",
             color=discord.Color.blue()
         )
 
@@ -46,8 +46,15 @@ async def setup(bot: commands.Bot):
             inline=False
         )
 
+        # MINI-JOGOS
         embed.add_field(
-            name="🎮 Pedra, Papel, Tesoura e Bomba",
+            name="🎮 Mini-jogos: Pedra, Papel, Tesoura e Bomba",
+            value="Diversão rápida no chat ou em duelo PvP.",
+            inline=False
+        )
+
+        embed.add_field(
+            name="🧑‍🤝‍🧑 Modos Solo (você vs Bot)",
             value=(
                 "**/ppt [escolha]**\n"
                 "Pedra, Papel e Tesoura **(sem bomba)**.\n"
@@ -57,6 +64,22 @@ async def setup(bot: commands.Bot):
                 "Pedra, Papel, Tesoura e **Bomba**.\n"
                 "• Sem parâmetro → abre botões.\n"
                 "• Com parâmetro → resolve direto. Opções: `pedra`, `papel`, `tesoura`, `bomba`, `aleatoria` (pode sair 💣)."
+            ),
+            inline=False
+        )
+
+        embed.add_field(
+            name="🤼 Modos PvP (jogador vs jogador)",
+            value=(
+                "**/pptbd @PC1 [PC 1 Bomba] @PC2 [PC 2 Bomba]**\n"
+                "Duelo rápido (resultado imediato, sorteio feito pelo bot).\n"
+                "• **PC 1 Bomba / PC 2 Bomba** → escolha: 🚫 Sem bomba (padrão) ou 💣 Com bomba.\n"
+                "• Exemplo: `/pptbd @Jogador1 🚫 Sem bomba @Jogador2 💣 Com bomba`\n\n"
+                "**/duelo @PC1 [PC 1 Bomba] @PC2 [PC 2 Bomba]**\n"
+                "Duelo interativo por **DM** (cada jogador escolhe sua jogada com botões).\n"
+                "• Tempo limite: 60s (se não escolher, sai jogada aleatória e o bot avisa por DM).\n"
+                "• Resultado é revelado no canal onde o comando foi chamado.\n"
+                "• Exemplo: `/duelo @Jogador1 💣 Com bomba @Jogador2 🚫 Sem bomba`"
             ),
             inline=False
         )
