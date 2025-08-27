@@ -71,15 +71,17 @@ async def setup(bot: commands.Bot):
         embed.add_field(
             name="🤼 Modos PvP (jogador vs jogador)",
             value=(
-                "**/pptbd @PC1 [PC 1 Bomba] @PC2 [PC 2 Bomba]**\n"
+                "**/pptbd @PC1 @PC2 [PC 1 Bomba] [PC 2 Bomba]**\n"
                 "Duelo rápido (resultado imediato, sorteio feito pelo bot).\n"
                 "• **PC 1 Bomba / PC 2 Bomba** → escolha: 🚫 Sem bomba (padrão) ou 💣 Com bomba.\n"
-                "• Exemplo: `/pptbd @Jogador1 🚫 Sem bomba @Jogador2 💣 Com bomba`\n\n"
-                "**/duelo @PC1 [PC 1 Bomba] @PC2 [PC 2 Bomba]**\n"
+                "• Exemplo:\n"
+                "```/pptbd @Jogador1 @Jogador2 (PC 1 Bomba: 🚫 Sem bomba) (PC 2 Bomba: 💣 Com bomba)```\n\n"
+                "**/duelo @PC1 @PC2 [PC 1 Bomba] [PC 2 Bomba]**\n"
                 "Duelo interativo por **DM** (cada jogador escolhe sua jogada com botões).\n"
                 "• Tempo limite: 60s (se não escolher, sai jogada aleatória e o bot avisa por DM).\n"
                 "• Resultado é revelado no canal onde o comando foi chamado.\n"
-                "• Exemplo: `/duelo @Jogador1 💣 Com bomba @Jogador2 🚫 Sem bomba`"
+                "• Exemplo:\n"
+                "```/duelo @Jogador1 @Jogador2 (PC 1 Bomba: 💣 Com bomba) (PC 2 Bomba: 🚫 Sem bomba)```"
             ),
             inline=False
         )
