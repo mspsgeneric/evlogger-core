@@ -23,7 +23,8 @@ class RelayCog(commands.Cog):
         self.bot = bot
         self.user_cooldowns: dict[int, float] = {}
         self.channel_cooldowns: dict[int, float] = {}
-        self.warned_guilds: set[int] = set()  # servidores já avisados de 90%
+        self.warned_guilds: set[int] = set()  # servidores já avisados ao atingir 90%
+        self.disabled_notice_ts: dict[int, float] = {}  # rate-limit do aviso "não habilitado"
 
     @commands.Cog.listener()
     async def on_message(self, message: discord.Message):
@@ -51,9 +52,10 @@ class RelayCog(commands.Cog):
 
         if not isinstance(message.channel, discord.TextChannel):
             return
-        if message.content.endswith(TRANSLATED_FLAG):
+        if (message.content or "").strip().endswith(TRANSLATED_FLAG):
             return
 
+        # Link fonte→alvo configurado?
         info = await get_link_info(DB_PATH, message.guild.id, message.channel.id)
         if not info:
             return
@@ -69,6 +71,7 @@ class RelayCog(commands.Cog):
         if len(text) > MAX_MSG_LEN:
             text = text[:MAX_MSG_LEN] + " (…)"  # truncagem
 
+        # cooldowns de usuário e canal
         now = time.time()
         last_user = self.user_cooldowns.get(message.author.id, 0.0)
         if now - last_user < USER_COOLDOWN_SEC:
@@ -80,21 +83,86 @@ class RelayCog(commands.Cog):
             return
         self.channel_cooldowns[message.channel.id] = now
 
-        # QUOTA (Supabase)
+        # --- limpeza eventual dos dicionários de cooldown ---
+        if len(self.user_cooldowns) > 10000:
+            cutoff = now - max(USER_COOLDOWN_SEC * 2, 120)
+            self.user_cooldowns = {
+                uid: ts for uid, ts in self.user_cooldowns.items() if ts >= cutoff
+            }
+
+        if len(self.channel_cooldowns) > 10000:
+            cutoff = now - max(CHANNEL_COOLDOWN_SEC * 2, 120)
+            self.channel_cooldowns = {
+                cid: ts for cid, ts in self.channel_cooldowns.items() if ts >= cutoff
+            }
+
+        # --- SUPABASE: garantir linha e ler flags/cota ---
         try:
             await asyncio.to_thread(ensure_guild_row, message.guild.id)
         except Exception:
+            # não trava a tradução; só evita crash
             pass
 
+        try:
+            quota_snapshot = await asyncio.to_thread(get_quota, message.guild.id)
+        except Exception as e:
+            logging.exception(
+                "Falha ao consultar cota/flags no Supabase (guild=%s channel=%s msg_id=%s): %s",
+                message.guild.id, message.channel.id, message.id, e
+            )
+            return
+
+        # 🔒 Checar cedo se a guilda está habilitada
+        translate_enabled = bool(quota_snapshot.get("translate_enabled", False))
+        if not translate_enabled:
+            # Rate-limit do aviso de "não habilitado" por 60s por guild
+            last_notice = self.disabled_notice_ts.get(message.guild.id, 0.0)
+            if now - last_notice > 60:
+                try:
+                    await message.channel.send(
+                        "🚫 Este servidor **não está habilitado** para tradução no momento. "
+                        "Entre em contato com o criador/gerente do bot."
+                    )
+                except Exception as e:
+                    logging.warning(
+                        "Falha ao enviar aviso de 'não habilitado' no canal (guild=%s channel=%s): %s",
+                        message.guild.id, message.channel.id, e
+                    )
+                self.disabled_notice_ts[message.guild.id] = now
+            return
+
+        # Depois de confirmar habilitação, podemos seguir com a cota
         try:
             allowed, remaining = await asyncio.to_thread(
                 consume_chars, message.guild.id, len(text)
             )
-            quota = await asyncio.to_thread(get_quota, message.guild.id)
-            char_limit = quota["char_limit"]
-            used_chars = quota["used_chars"]
+        except Exception as e:
+            logging.exception(
+                "Falha ao consumir cota no Supabase (guild=%s channel=%s msg_id=%s): %s",
+                message.guild.id, message.channel.id, message.id, e
+            )
+            return
 
-            # 🔔 Alerta de 90% de uso
+        if not allowed:
+            try:
+                await message.channel.send(
+                    "⚠️ A cota de tradução deste servidor está esgotada por enquanto. "
+                    "Um admin pode ajustar o limite ou aguardar o reset mensal (`/quota`)."
+                )
+            except Exception as e:
+                logging.warning(
+                    "Falha ao enviar aviso de cota esgotada no canal (guild=%s channel=%s): %s",
+                    message.guild.id, message.channel.id, e
+                )
+            return
+
+        # Reconsulta números atualizados para alerta de 90%
+        try:
+            quota = await asyncio.to_thread(get_quota, message.guild.id)
+            char_limit = quota.get("char_limit") or 0
+            used_chars = quota.get("used_chars") or 0
+
+            # 🔔 Alerta de 90% de uso (DM para o dono, com fallback para 1º admin humano)
             if (
                 char_limit
                 and used_chars >= 0.9 * char_limit
@@ -105,44 +173,70 @@ class RelayCog(commands.Cog):
                     f"⚠️ Este servidor já consumiu {used_chars:,} de {char_limit:,} caracteres "
                     f"(90% da cota mensal). Considere ajustar o limite ou aguardar o reset."
                 )
+
+                sent = False
+                # 1) tentar DM para o dono
                 try:
                     if message.guild.owner:
                         await message.guild.owner.send(warning)
+                        sent = True
                 except Exception as e:
-                    logging.warning("Falha ao enviar DM ao dono do servidor: %s", e)
+                    logging.warning(
+                        "Falha ao enviar DM ao dono do servidor (guild=%s): %s",
+                        message.guild.id, e
+                    )
 
-                for member in message.guild.members:
-                    if member.guild_permissions.administrator and not member.bot:
-                        try:
-                            await member.send(warning)
-                        except Exception:
-                            continue
+                # 2) fallback: primeiro admin humano
+                if not sent:
+                    try:
+                        admin = next(
+                            (m for m in message.guild.members
+                             if m.guild_permissions.administrator and not m.bot),
+                            None
+                        )
+                        if admin:
+                            await admin.send(warning)
+                            sent = True
+                    except Exception as e:
+                        logging.warning(
+                            "Falha ao enviar DM ao admin (fallback) (guild=%s): %s",
+                            message.guild.id, e
+                        )
 
+                if not sent:
+                    logging.info(
+                        "Não foi possível notificar dono/admin sobre 90%% da cota em guild %s",
+                        message.guild.id,
+                    )
+
+            # se voltou a ficar baixo (ex.: reset), limpa flag
             if used_chars < 1000 and message.guild.id in self.warned_guilds:
                 self.warned_guilds.remove(message.guild.id)
 
         except Exception as e:
-            logging.exception("Falha ao consultar/consumir cota no Supabase: %s", e)
-            return
-
-        if not allowed:
-            await message.channel.send(
-                "⚠️ A cota de tradução deste servidor está esgotada por enquanto. "
-                "Um admin pode ajustar o limite ou aguardar o reset mensal (`/quota`)."
+            logging.exception(
+                "Falha ao consultar cota (pós-consumo) no Supabase (guild=%s channel=%s msg_id=%s): %s",
+                message.guild.id, message.channel.id, message.id, e
             )
-            return
+            # não retorna; a tradução já foi autorizada, seguimos
 
-        # traduz (apenas google_web_translate)
+        # --- traduz (apenas google_web_translate) ---
         try:
-            async with self.bot.sem:  # type: ignore[attr-defined]
+            sem = getattr(self.bot, "sem", None)
+            if sem is None:
+                sem = asyncio.Semaphore(1)
+            async with sem:
                 translated = await google_web_translate(
                     self.bot.http_session, text, src_lang, target_lang
                 )  # type: ignore[attr-defined]
         except Exception as e:
-            logging.exception("Falha ao traduzir: %s", e)
+            logging.exception(
+                "Falha ao traduzir (guild=%s channel=%s msg_id=%s): %s",
+                message.guild.id, message.channel.id, message.id, e
+            )
             return
 
-        # envia via webhook
+        # --- envia via webhook ---
         try:
             if is_proxy_msg:
                 username = message.author.name or message.author.display_name
@@ -162,4 +256,7 @@ class RelayCog(commands.Cog):
                     target_ch, message.author, f"{translated}{TRANSLATED_FLAG}"
                 )  # type: ignore[attr-defined]
         except Exception as e:
-            logging.exception("Falha ao enviar via webhook: %s", e)
+            logging.exception(
+                "Falha ao enviar via webhook (guild=%s channel=%s msg_id=%s): %s",
+                message.guild.id, message.channel.id, message.id, e
+            )
