@@ -54,7 +54,8 @@ intents = Intents.default()
 intents.message_content = True
 intents.guilds = True  # necessário para listar guilds e detectar rename
 
-bot = commands.Bot(command_prefix="!", intents=intents)
+# bot = commands.Bot(command_prefix="!", intents=intents)
+bot = commands.Bot(command_prefix=commands.when_mentioned, intents=intents)
 
 from lembretes import setup as setup_lembretes
 setup_lembretes(bot)
