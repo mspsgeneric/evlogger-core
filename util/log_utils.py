@@ -1,7 +1,7 @@
 import discord, html, textwrap, re, logging
 from io import BytesIO
-from util.supabase import get_supabase
-from util.email import enviar_email
+from util.db_supabase import get_supabase
+from util.email_sender import enviar_email
 
 logger = logging.getLogger(__name__)
 

@@ -64,7 +64,7 @@ membro_cache = {}
 
 # ===================== SUPABASE =====================
 
-from util.supabase import get_supabase
+from util.db_supabase import get_supabase
 supabase = get_supabase()
 
 def _is_guild_registered(guild_id: int) -> bool:
@@ -342,6 +342,7 @@ async def load_commands():
     await bot.load_extension("comandos.check")
     await bot.load_extension("comandos.duelo")
     await bot.load_extension("comandos.pptbd")
+    await bot.load_extension("comandos.custom_conteudo")
 
 # ===================== MAIN =====================
 

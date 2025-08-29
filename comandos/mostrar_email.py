@@ -1,6 +1,6 @@
 from discord import app_commands, Interaction
 from discord.ext import commands
-from util.supabase import get_supabase
+from util.db_supabase import get_supabase
 import logging
 
 supabase = get_supabase()

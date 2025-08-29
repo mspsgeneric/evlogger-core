@@ -45,7 +45,7 @@ else:
     load_dotenv()
 TEST_GUILD_ID = int(os.getenv("TEST_GUILD_ID", "0"))
 
-from util.supabase import get_supabase
+from util.db_supabase import get_supabase
 supabase = get_supabase()
 
 TOKEN = os.getenv("DISCORD_TOKEN")
