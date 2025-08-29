@@ -180,35 +180,62 @@ class PageController(discord.ui.View):
         b = min(a + self.page_size, self.total)
         return self.matches[a:b]
 
-    async def render_page(self, interaction: Interaction):
-        """Como cada interação (slash OU botão) é deferida antes, aqui só followup."""
-        items = self.slice()
+    def _update_buttons_state(self):
+        # habilita/desabilita conforme a página atual
+        if hasattr(self, "prev"):
+            self.prev.disabled = (self.page == 0)
+        if hasattr(self, "next"):
+            self.next.disabled = (self.page >= self.total_pages - 1)
 
-        # cards da página
-        for item in items:
+    async def render_page(self, interaction: Interaction):
+        """
+        - Envia os cards da página atual (ephemeral).
+        - Se houver só 1 página, NÃO anexa view (sem botões).
+        - Se houver mais de 1, anexa a view e ajusta os estados dos botões.
+        """
+        items = self.slice()
+        responded = interaction.response.is_done()
+
+        # cards
+        for idx, item in enumerate(items):
             embed = build_short_embed(item, self.campo, self.termo)
             view = ItemView(item, self.user_id)
-            await interaction.followup.send(embed=embed, view=view, ephemeral=True)
+            if not responded and idx == 0:
+                await interaction.response.send_message(embed=embed, view=view, ephemeral=True)
+                responded = True
+            else:
+                await interaction.followup.send(embed=embed, view=view, ephemeral=True)
 
-        # barra de navegação + os botões desta view
+        # navegação (texto)
         nav = f"Página {self.page+1}/{self.total_pages} — {self.total} resultados"
-        await interaction.followup.send(content=nav, view=self, ephemeral=True)
+
+        # se só tem 1 página: não manda a view -> sem botões
+        if self.total_pages == 1:
+            if responded:
+                await interaction.followup.send(content=nav, ephemeral=True)
+            else:
+                await interaction.response.send_message(content=nav, ephemeral=True)
+            return
+
+        # mais de 1 página: manda com a view e atualiza estado dos botões
+        self._update_buttons_state()
+        if responded:
+            await interaction.followup.send(content=nav, view=self, ephemeral=True)
+        else:
+            await interaction.response.send_message(content=nav, view=self, ephemeral=True)
 
     @discord.ui.button(label="◀️ Anterior", style=discord.ButtonStyle.secondary)
     async def prev(self, interaction: Interaction, button: discord.ui.Button):
-        # **IMPORTANTE**: sempre deferir interação de botão antes de usar followup
-        await interaction.response.defer(ephemeral=True, thinking=False)
         if self.page > 0:
             self.page -= 1
         await self.render_page(interaction)
 
     @discord.ui.button(label="Próximo ▶️", style=discord.ButtonStyle.secondary)
     async def next(self, interaction: Interaction, button: discord.ui.Button):
-        # **IMPORTANTE**: sempre deferir interação de botão antes de usar followup
-        await interaction.response.defer(ephemeral=True, thinking=False)
         if self.page < self.total_pages - 1:
             self.page += 1
         await self.render_page(interaction)
+
 
 # ----------------- Registro do comando -----------------
 async def setup(bot: commands.Bot):
