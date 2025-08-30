@@ -343,6 +343,8 @@ async def load_commands():
     await bot.load_extension("comandos.duelo")
     await bot.load_extension("comandos.pptbd")
     await bot.load_extension("comandos.custom_conteudo")
+    await bot.load_extension("comandos.ver_wiki")
+
 
 # ===================== MAIN =====================
 
