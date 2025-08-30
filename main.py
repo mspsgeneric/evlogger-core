@@ -328,22 +328,35 @@ async def on_guild_update(before: discord.Guild, after: discord.Guild):
 # ===================== COMANDOS / COGS =====================
 
 async def load_commands():
-    await bot.load_extension("comandos.definir_email")
-    await bot.load_extension("comandos.mostrar_email")
-    await bot.load_extension("comandos.encerrar_cena")
-    await bot.load_extension("comandos.limpar_cena")
-    await bot.load_extension("comandos.ajuda")
-    await bot.load_extension("comandos.obter_log")
-    await bot.load_extension("comandos.gerar_evlog")
-    await bot.load_extension("comandos.arquivar_canal")
-    await bot.load_extension("comandos.pptb")
-    await bot.load_extension("comandos.ppt")
-    await bot.load_extension("comandos.blc_bylaws")
-    await bot.load_extension("comandos.check")
-    await bot.load_extension("comandos.duelo")
-    await bot.load_extension("comandos.pptbd")
-    await bot.load_extension("comandos.custom_conteudo")
-    await bot.load_extension("comandos.ver_wiki")
+    exts = [
+        "comandos.definir_email",
+        "comandos.mostrar_email",
+        "comandos.encerrar_cena",
+        "comandos.limpar_cena",
+        "comandos.ajuda",
+        "comandos.obter_log",
+        "comandos.gerar_evlog",
+        "comandos.arquivar_canal",
+        "comandos.pptb",
+        "comandos.ppt",
+        "comandos.blc_bylaws",
+        "comandos.check",
+        "comandos.duelo",
+        "comandos.pptbd",
+        "comandos.custom_conteudo",
+        "comandos.ver_wiki",
+    ]
+    loaded, failed = 0, 0
+    for ext in exts:
+        try:
+            await bot.load_extension(ext)
+            logging.info(f"[cogs] ✅ carregado: {ext}")
+            loaded += 1
+        except Exception as e:
+            logging.exception(f"[cogs] ❌ falha ao carregar {ext}: {e}")
+            failed += 1
+    logging.info(f"[cogs] resumo -> ok={loaded} fail={failed}")
+
 
 
 # ===================== MAIN =====================
