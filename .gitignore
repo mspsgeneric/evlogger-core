@@ -6,5 +6,5 @@ __pycache__/
 venv/
 logs/
 .env.dev
-bylaws/*.html
-bylaws/*.meta.json
+bylaws/bylaws_character.html
+bylaws/bylaws_character.meta.json
