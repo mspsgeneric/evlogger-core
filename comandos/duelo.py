@@ -83,27 +83,14 @@ class Duelo(commands.Cog):
         for partida in self.partidas.values():
             if user_id in (partida["j1"].id, partida["j2"].id):
                 partida["escolhas"][user_id] = (jogada, aleatorio)
+                # Se os dois já jogaram, dispara o evento para apurar imediatamente
+                if (
+                    partida["j1"].id in partida["escolhas"] and
+                    partida["j2"].id in partida["escolhas"]
+                ):
+                    partida["done"].set()
 
-    @app_commands.command(
-        name="duelo",
-        description="Inicia um duelo PvP em DM (pedra/papel/tesoura, com opção de bomba)."
-    )
-    @app_commands.describe(
-        jogador1="Jogador 1",
-        jogador2="Jogador 2",
-        pc1_bomba="PC 1 pode usar bomba?",
-        pc2_bomba="PC 2 pode usar bomba?",
-    )
-    @app_commands.choices(
-        pc1_bomba=[
-            app_commands.Choice(name="🚫 Sem bomba", value="sem"),
-            app_commands.Choice(name="💣 Com bomba", value="bomba"),
-        ],
-        pc2_bomba=[
-            app_commands.Choice(name="🚫 Sem bomba", value="sem"),
-            app_commands.Choice(name="💣 Com bomba", value="bomba"),
-        ],
-    )
+    @app_commands.command(name="duelo", description="Inicia um duelo PvP em DM (pedra/papel/tesoura, com opção de bomba).")
     async def duelo(
         self,
         interaction: discord.Interaction,
@@ -116,48 +103,53 @@ class Duelo(commands.Cog):
             await interaction.response.send_message("⚠️ Os jogadores devem ser diferentes.", ephemeral=True)
             return
 
-        partida = {"j1": jogador1, "j2": jogador2, "escolhas": {}}
+        # cria a partida com um Event para sinalizar conclusão
+        partida = {
+            "j1": jogador1,
+            "j2": jogador2,
+            "escolhas": {},
+            "done": asyncio.Event(),
+        }
         self.partidas[interaction.id] = partida
 
         await interaction.response.send_message(
             f"🎮 Duelo iniciado entre {jogador1.mention} e {jogador2.mention}! Jogadas serão escolhidas por DM."
         )
 
-        # usa "sem" como default se for None
         j1_b = pc1_bomba.value if pc1_bomba else "sem"
         j2_b = pc2_bomba.value if pc2_bomba else "sem"
-
         opcoes_j1 = OPCOES_PPTB if j1_b == "bomba" else OPCOES_PPT
         opcoes_j2 = OPCOES_PPTB if j2_b == "bomba" else OPCOES_PPT
 
-        # envia DM para cada jogador
+        # guarda opções para fallback aleatório coerente
+        partida["opcoes_j1"] = opcoes_j1
+        partida["opcoes_j2"] = opcoes_j2
+
         for jogador, opcoes, outro in (
             (jogador1, opcoes_j1, jogador2),
             (jogador2, opcoes_j2, jogador1),
         ):
             try:
                 view = EscolhaDM(jogador, parent=self, opcoes=opcoes)
-                await jogador.send(
-                    f"Escolha sua jogada no duelo contra {outro.mention}:",
-                    view=view
-                )
+                await jogador.send(f"Escolha sua jogada no duelo contra {outro.mention}:", view=view)
             except Exception:
                 await interaction.followup.send(f"❌ Não consegui enviar DM para {jogador.mention}.", ephemeral=True)
 
-        # espera 60s
-        await asyncio.sleep(60)
+        # aguarda até ambos jogarem OU até 60s
+        try:
+            await asyncio.wait_for(partida["done"].wait(), timeout=60)
+        except asyncio.TimeoutError:
+            pass  # vai completar com escolhas aleatórias abaixo se faltar alguém
 
-        # resolve duelo (aleatório se não jogou)
+        # resolve (aleatório para quem não jogou)
         jog1, ale1 = partida["escolhas"].get(jogador1.id, (randchoice(opcoes_j1), True))
         jog2, ale2 = partida["escolhas"].get(jogador2.id, (randchoice(opcoes_j2), True))
 
         r = resultado(jog1, jog2)
-
         texto = (
             f"👤 {jogador1.mention}: {EMOJI[jog1]} {jog1.capitalize()}{' (aleatório)' if ale1 else ''}\n"
             f"👤 {jogador2.mention}: {EMOJI[jog2]} {jog2.capitalize()}{' (aleatório)' if ale2 else ''}\n\n"
         )
-
         if r == "empate":
             texto += "🟨 **Empate!**"
         elif r == "jogador1":
@@ -166,7 +158,7 @@ class Duelo(commands.Cog):
             texto += f"🟥 **{jogador2.mention} venceu!**"
 
         await interaction.followup.send(texto)
-        del self.partidas[interaction.id]
+        self.partidas.pop(interaction.id, None)
 
 async def setup(bot: commands.Bot):
     await bot.add_cog(Duelo(bot))
