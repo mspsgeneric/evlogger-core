@@ -5,7 +5,7 @@ import discord
 ALLOWED_NONE = discord.AllowedMentions.none()
 
 async def setup(bot: commands.Bot):
-    @bot.tree.command(name="ajuda", description="Mostra todos os comandos disponíveis do EVlogger.")
+    @bot.tree.command(name="ajuda", description="Mostra os comandos disponíveis do EVlogger.")
     async def ajuda(interaction: discord.Interaction):
         embed = discord.Embed(
             title="📘 Comandos do EVlogger",
@@ -24,10 +24,10 @@ async def setup(bot: commands.Bot):
                 "Salva o log da cena atual, envia por e-mail (caso configurado) e também por DM em formato `.txt`.\n\n"
                 "**/limpar_canal**\n"
                 "⚠️ 'Limpa' o canal atual.\n"
-                "O log será salvo e enviado antes da limpeza, se possível.\n\n"
+                "O log será salvo e enviado antes da limpeza, como em encerrar cena.\n\n"
                 "**/arquivar_canal**\n"
-                "⚠️ Arquiva o canal atual **permanentemente**.\n"
-                "O log será salvo e enviado antes da exclusão, se possível."
+                "⚠️ Arquiva (apaga/exclui) o canal atual **permanentemente**.\n"
+                "O log será salvo e enviado antes da exclusão, como em encerrar cena."
             ),
             inline=False
         )
@@ -41,10 +41,17 @@ async def setup(bot: commands.Bot):
                 "**/check**\n"
                 "Mostra **só para você** as datas e horas em que **você** baixou o log **neste canal**.\n"
                 "• Não revela retiradas de outras pessoas.\n"
-                "• Se você ainda não retirou nenhum log deste canal, o bot informa isso claramente."
+                "• Se você ainda não retirou nenhum log deste canal, o bot informa isso claramente.\n\n"
+                "**/wiki [nome do personagem]**\n"
+                "Busca na **Wiki da OWBN**. Retorna resultados resumidos com link direto para a página do personagem.\n"
+                "• Exemplo: `/wiki João`\n\n"
+                "**/custom [termo]**\n"
+                "Consulta a base de conteudo custom.\n"
+                "• Exemplo: `/custom nome | erato`"
             ),
             inline=False
         )
+
 
         # MINI-JOGOS
         embed.add_field(
