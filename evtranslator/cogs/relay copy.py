@@ -4,10 +4,6 @@ import asyncio
 import logging
 import discord
 from discord.ext import commands
-import os
-import random
-from dataclasses import dataclass
-
 
 from evtranslator.config import (
     DB_PATH,
@@ -22,66 +18,6 @@ from evtranslator.translate import google_web_translate
 from evtranslator.supabase_client import consume_chars, ensure_guild_row, get_quota
 
 
-class TokenBucket:
-    def __init__(self, rate_per_sec: float, capacity: float):
-        self.rate = float(rate_per_sec)
-        self.capacity = float(capacity)
-        self.tokens = float(capacity)
-        self.last = time.perf_counter()
-
-    async def acquire(self):
-        while True:
-            now = time.perf_counter()
-            elapsed = now - self.last
-            self.last = now
-            self.tokens = min(self.capacity, self.tokens + elapsed * self.rate)
-            if self.tokens >= 1.0:
-                self.tokens -= 1.0
-                return
-            # espera o suficiente para formar 1 token
-            await asyncio.sleep(max(0.0, (1.0 - self.tokens) / self.rate))
-
-@dataclass
-class BackoffCfg:
-    attempts: int = 3
-    base: float = 0.3   # s
-    factor: float = 2.0
-    max_delay: float = 2.0
-    jitter_ms: int = 150
-
-class ExponentialBackoff:
-    def __init__(self, cfg: BackoffCfg):
-        self.cfg = cfg
-        self.try_n = 0
-
-    def next_delay(self) -> float:
-        d = min(self.cfg.base * (self.cfg.factor ** self.try_n), self.cfg.max_delay)
-        j = random.uniform(0, self.cfg.jitter_ms / 1000.0)
-        self.try_n += 1
-        return d + j
-
-class CircuitBreaker:
-    def __init__(self, fail_threshold: int = 6, cooldown_sec: float = 30.0):
-        self.fail_threshold = fail_threshold
-        self.cooldown_sec = cooldown_sec
-        self.fail_count = 0
-        self.open_until = 0.0
-
-    @property
-    def is_open(self) -> bool:
-        return time.monotonic() < self.open_until
-
-    def on_success(self):
-        self.fail_count = 0
-
-    def on_failure(self):
-        self.fail_count += 1
-        if self.fail_count >= self.fail_threshold:
-            self.open_until = time.monotonic() + self.cooldown_sec
-            self.fail_count = 0
-
-
-
 class RelayCog(commands.Cog):
     def __init__(self, bot: commands.Bot):
         self.bot = bot
@@ -89,39 +25,6 @@ class RelayCog(commands.Cog):
         self.channel_cooldowns: dict[int, float] = {}
         self.warned_guilds: set[int] = set()  # servidores já avisados ao atingir 90%
         self.disabled_notice_ts: dict[int, float] = {}  # rate-limit do aviso "não habilitado"
-        # --- EV modo-evento e controles de capacidade ---
-        self.event_mode = os.getenv("EV_MODE_EVENT", "false").lower() == "true"
-
-        # Cooldowns “modo evento” (fallback para os teus valores padrão)
-        self.user_cd_event = float(os.getenv("EV_USER_COOLDOWN_SEC", "1.5"))
-        self.chan_cd_event = float(os.getenv("EV_CHANNEL_COOLDOWN_SEC", "2.0"))
-
-        # Rate cap (RPS) e burst curto
-        rate = float(os.getenv("EV_PROVIDER_RATE_CAP", "12"))    # rps
-        burst = float(os.getenv("EV_PROVIDER_BURST", "24"))      # burst curto
-        self.rate_limiter = TokenBucket(rate, burst)
-
-        # Timeout duro por tradução + jitter anti-rajada
-        self.translate_timeout = float(os.getenv("EV_TRANSLATE_TIMEOUT", "8"))  # s
-        self.jitter_ms = int(os.getenv("EV_JITTER_MS", "150"))
-
-        # Backoff e breaker (sem fallback: só “esfria” quando ferver)
-        self.backoff_cfg = BackoffCfg(
-            attempts = int(os.getenv("EV_RETRY_ATTEMPTS", "3")),
-            base     = float(os.getenv("EV_RETRY_BASE", "0.3")),
-            factor   = float(os.getenv("EV_RETRY_FACTOR", "2.0")),
-            max_delay= float(os.getenv("EV_RETRY_MAX", "2.0")),
-            jitter_ms= int(os.getenv("EV_RETRY_JITTER_MS", "150")),
-        )
-        self.cb = CircuitBreaker(
-            fail_threshold = int(os.getenv("EV_CB_THRESHOLD", "6")),
-            cooldown_sec   = float(os.getenv("EV_CB_COOLDOWN", "30")),
-        )
-
-        # Dedupe leve (drop de mensagens idênticas curtinhas em janela)
-        self.dedupe_window = float(os.getenv("EV_DEDUPE_WINDOW_SEC", "3.0"))
-        self._last_hash_by_user_chan: dict[tuple[int,int], tuple[str,float]] = {}
-
 
     @commands.Cog.listener()
     async def on_message(self, message: discord.Message):
@@ -170,19 +73,15 @@ class RelayCog(commands.Cog):
 
         # cooldowns de usuário e canal
         now = time.time()
-
-        user_cd = self.user_cd_event if self.event_mode else USER_COOLDOWN_SEC
         last_user = self.user_cooldowns.get(message.author.id, 0.0)
-        if now - last_user < user_cd:
+        if now - last_user < USER_COOLDOWN_SEC:
             return
         self.user_cooldowns[message.author.id] = now
 
-        chan_cd = self.chan_cd_event if self.event_mode else CHANNEL_COOLDOWN_SEC
         last_ch = self.channel_cooldowns.get(message.channel.id, 0.0)
-        if now - last_ch < chan_cd:
+        if now - last_ch < CHANNEL_COOLDOWN_SEC:
             return
         self.channel_cooldowns[message.channel.id] = now
-
 
         # --- limpeza eventual dos dicionários de cooldown ---
         if len(self.user_cooldowns) > 10000:
@@ -321,77 +220,21 @@ class RelayCog(commands.Cog):
             )
             # não retorna; a tradução já foi autorizada, seguimos
 
-
-
-        # Dedupe leve em modo-evento: drop de repetição curtinha por autor/canal
-        if self.event_mode:
-            key = (message.channel.id, message.author.id)
-            norm = " ".join(text.split())[:140]
-            ts_now = time.monotonic()
-            last = self._last_hash_by_user_chan.get(key)
-            if norm and last:
-                lasth, lastt = last
-                if norm == lasth and (ts_now - lastt) < self.dedupe_window:
-                    return
-            self._last_hash_by_user_chan[key] = (norm, ts_now)
-    
-
-        # --- traduz (com jitter, rate cap, timeout, backoff e breaker) ---
-        if self.cb.is_open:
-            logging.warning(
-                "CB open: pausando traduções por curto período (guild=%s ch=%s)",
-                message.guild.id, message.channel.id
+        # --- traduz (apenas google_web_translate) ---
+        try:
+            sem = getattr(self.bot, "sem", None)
+            if sem is None:
+                sem = asyncio.Semaphore(1)
+            async with sem:
+                translated = await google_web_translate(
+                    self.bot.http_session, text, src_lang, target_lang
+                )  # type: ignore[attr-defined]
+        except Exception as e:
+            logging.exception(
+                "Falha ao traduzir (guild=%s channel=%s msg_id=%s): %s",
+                message.guild.id, message.channel.id, message.id, e
             )
             return
-
-        # jitter para desfazer sincronização (0..EV_JITTER_MS ms)
-        if self.jitter_ms > 0:
-            await asyncio.sleep(random.uniform(0, self.jitter_ms / 1000.0))
-
-        # respeita RPS cap global do provedor
-        await self.rate_limiter.acquire()
-
-        sem = getattr(self.bot, "sem", None)
-        if sem is None:
-            sem = asyncio.Semaphore(1)
-
-        bo = ExponentialBackoff(self.backoff_cfg)
-        translated = None
-        last_err = None
-
-        for attempt in range(self.backoff_cfg.attempts):
-            try:
-                async with sem:
-                    translated = await asyncio.wait_for(
-                        google_web_translate(  # tua função real
-                            self.bot.http_session, text, src_lang, target_lang
-                        ),
-                        timeout=self.translate_timeout,
-                    )
-                self.cb.on_success()
-                break
-            except asyncio.TimeoutError as e:
-                last_err = e
-                self.cb.on_failure()
-            except Exception as e:
-                last_err = e
-                msg = str(e).lower()
-                if "429" in msg or "too many" in msg or "rate" in msg or "timeout" in msg or msg.startswith("5"):
-                    self.cb.on_failure()
-                else:
-                    logging.exception("Erro não recuperável na tradução: %r", e)
-                    break
-
-            if attempt < self.backoff_cfg.attempts - 1:
-                await asyncio.sleep(bo.next_delay())
-
-        if translated is None:
-            logging.warning(
-                "Tradução falhou apos %d tentativas (guild=%s ch=%s msg=%s) ultimo_erro=%r",
-                self.backoff_cfg.attempts, message.guild.id, message.channel.id, message.id, last_err
-            )
-            return
-
 
         # --- envia via webhook ---
         try:
