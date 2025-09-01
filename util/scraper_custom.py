@@ -18,11 +18,15 @@ BASE_URL = "https://www.owbn.net"
 CUSTOM_CONTENT_URL = f"{BASE_URL}/resources/custom-content"
 
 # ---------- HTTP session (User-Agent + timeout) ----------
+SCRAPER_UA = os.getenv(
+    "SCRAPER_UA",
+    "evlogger-custom-scraper (+contact: maurospsilva@gmail.com)"
+)
+
 session = requests.Session()
-session.headers.update({
-    "User-Agent": "OWBN-Custom-Scraper (contact: your-email@example.com)"
-})
+session.headers.update({"User-Agent": SCRAPER_UA})
 REQ_TIMEOUT = 20
+
 
 
 # ---------- Helpers ----------
