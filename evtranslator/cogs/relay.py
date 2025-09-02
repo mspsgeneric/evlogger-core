@@ -22,6 +22,41 @@ from evtranslator.translate import google_web_translate
 from evtranslator.supabase_client import consume_chars, ensure_guild_row, get_quota
 
 
+# === Helpers de anexos (embed-only) ===
+MAX_FILES_PER_MESSAGE = 10
+
+_IMG_EXTS = (".png", ".jpg", ".jpeg", ".gif", ".webp")
+
+def _is_image(att: discord.Attachment) -> bool:
+    # tenta pelo content_type; se vier None, cai no filename
+    if att.content_type and att.content_type.startswith("image/"):
+        return True
+    name = (att.filename or "").lower()
+    return name.endswith(_IMG_EXTS)
+
+def _build_embeds_and_links(atts: list[discord.Attachment]) -> tuple[list[discord.Embed], list[str]]:
+    """Cria embeds para até 10 imagens e devolve links (com spoiler preservado) para o restante."""
+    embeds: list[discord.Embed] = []
+    links: list[str] = []
+
+    count = 0
+    for a in atts:
+        # não embeda spoiler: deixa como link com markdown de spoiler
+        if count < MAX_FILES_PER_MESSAGE and _is_image(a) and not a.is_spoiler():
+            emb = discord.Embed()
+            emb.set_image(url=a.url)  # sem download
+            embeds.append(emb)
+            count += 1
+        else:
+            url = f"||{a.url}||" if a.is_spoiler() else a.url
+            links.append(url)
+
+    return embeds, links
+
+
+
+
+
 class TokenBucket:
     def __init__(self, rate_per_sec: float, capacity: float):
         self.rate = float(rate_per_sec)
@@ -393,27 +428,77 @@ class RelayCog(commands.Cog):
             return
 
 
-        # --- envia via webhook ---
+        # --- envia via webhook (EMBED-ONLY) ---
         try:
+            conteudo = f"{translated}{TRANSLATED_FLAG}"
+
+            # Monta embeds p/ imagens e links p/ demais anexos (preserva spoiler)
+            embeds, links_fallback = _build_embeds_and_links(message.attachments or [])
+
+            # Anexa os links no final do texto (ou manda numa 2ª msg se passar 2000 chars)
+            if links_fallback:
+                links_txt = "\n".join(f"• {u}" for u in links_fallback)
+                sufixo = "\n\n**Anexos:**\n" + links_txt
+                if len(conteudo) + len(sufixo) <= MAX_MSG_LEN:
+                    conteudo += sufixo
+                else:
+                    # envia corpo + embeds primeiro
+                    try:
+                        if is_proxy_msg:
+                            username = message.author.name or message.author.display_name
+                            avatar_url = str(message.author.display_avatar.url) if message.author.display_avatar else None
+                            await self.bot.webhooks.send_as_identity(
+                                target_ch,
+                                username=username,
+                                avatar_url=avatar_url,
+                                text=conteudo,
+                                embeds=embeds,
+                                allowed_mentions=discord.AllowedMentions.none(),
+                            )
+                        else:
+                            await self.bot.webhooks.send_as_member(
+                                target_ch,
+                                message.author,
+                                conteudo,
+                                embeds=embeds,
+                                allowed_mentions=discord.AllowedMentions.none(),  # type: ignore[attr-defined]
+                            )
+                    except TypeError:
+                        # wrappers não aceitaram embeds/allowed_mentions → fallback simples
+                        await target_ch.send(content=conteudo, embeds=embeds, allowed_mentions=discord.AllowedMentions.none())
+
+                    # depois envia apenas os links
+                    conteudo = "**Anexos:**\n" + links_txt
+                    embeds = []
+
+            # envio principal (tudo em UMA mensagem quando possível)
             if is_proxy_msg:
                 username = message.author.name or message.author.display_name
-                avatar_url = (
-                    str(message.author.display_avatar.url)
-                    if message.author.display_avatar
-                    else None
-                )
+                avatar_url = str(message.author.display_avatar.url) if message.author.display_avatar else None
                 await self.bot.webhooks.send_as_identity(
                     target_ch,
                     username=username,
                     avatar_url=avatar_url,
-                    text=f"{translated}{TRANSLATED_FLAG}",
+                    text=conteudo,
+                    embeds=embeds,
+                    allowed_mentions=discord.AllowedMentions.none(),
                 )
             else:
                 await self.bot.webhooks.send_as_member(
-                    target_ch, message.author, f"{translated}{TRANSLATED_FLAG}"
-                )  # type: ignore[attr-defined]
+                    target_ch,
+                    message.author,
+                    conteudo,
+                    embeds=embeds,
+                    allowed_mentions=discord.AllowedMentions.none(),  # type: ignore[attr-defined]
+                )
+
+        except TypeError:
+            # wrappers não aceitam embeds/allowed_mentions → fallback p/ send()
+            await target_ch.send(content=conteudo, embeds=embeds, allowed_mentions=discord.AllowedMentions.none())
         except Exception as e:
             logging.exception(
                 "Falha ao enviar via webhook (guild=%s channel=%s msg_id=%s): %s",
                 message.guild.id, message.channel.id, message.id, e
             )
+
+
