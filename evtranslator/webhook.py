@@ -1,10 +1,8 @@
-
 from __future__ import annotations
 import logging
 import discord
 from typing import Optional
 from discord import AllowedMentions
-
 
 class WebhookSender:
     def __init__(self, bot_user_id: int):
@@ -31,24 +29,46 @@ class WebhookSender:
             logging.warning("Falha ao obter/criar webhook em #%s: %s", channel.name, e)
             return None
 
-    async def send_as_member(self, channel: discord.TextChannel, member: discord.Member, text: str):
-        """Envia mensagem imitando um membro humano (apelido + avatar)."""
-        allowed = AllowedMentions.none()
+    # ---------- NOVO: helper p/ normalizar kwargs ----------
+    def _norm_kwargs(self, kwargs: dict, default_allowed: AllowedMentions) -> dict:
+        # aceitar Embed único ou lista
+        if "embeds" in kwargs and isinstance(kwargs["embeds"], discord.Embed):
+            kwargs["embeds"] = [kwargs["embeds"]]
+        # uniformizar 'text' -> 'content' se vier por engano
+        if "text" in kwargs and "content" not in kwargs:
+            kwargs["content"] = kwargs.pop("text")
+        # garantir allowed_mentions padrão se não vier
+        kwargs.setdefault("allowed_mentions", default_allowed)
+        return kwargs
+
+    async def send_as_member(self, channel: discord.TextChannel, member: discord.Member, text: str, **kwargs):
+        """Envia mensagem imitando um membro humano (apelido + avatar). Aceita embeds, files, etc."""
+        default_allowed = AllowedMentions.none()
+        kwargs = self._norm_kwargs(kwargs, default_allowed)
+
         wh = await self.get_or_create(channel)
-        display = member.display_name
+        display = member.display_name or member.name
         avatar = member.display_avatar.replace(size=128).url if member.display_avatar else None
+
         if wh:
             try:
                 await wh.send(
-                    text,
+                    content=text,
                     username=display,
                     avatar_url=avatar,
-                    allowed_mentions=allowed,
+                    wait=False,
+                    **kwargs,  # repassa embeds, files, allowed_mentions, etc.
                 )
                 return
             except Exception as e:
                 logging.warning("Webhook falhou em #%s: %s — usando fallback.", channel.name, e)
-        await channel.send(f"**{display}:** {text}", allowed_mentions=allowed)
+
+        # Fallback mantém o display do autor; repassa embeds se houver
+        await channel.send(
+            content=f"**{display}:** {text}",
+            embeds=kwargs.get("embeds"),
+            allowed_mentions=kwargs.get("allowed_mentions", default_allowed),
+        )
 
     async def send_as_identity(
         self,
@@ -56,20 +76,30 @@ class WebhookSender:
         username: str,
         avatar_url: Optional[str],
         text: str,
+        **kwargs,
     ):
-        """Envia mensagem com nome/avatar arbitrários (útil para Tupperbox e webhooks)."""
-        allowed = AllowedMentions.none()
+        """Envia mensagem com nome/avatar arbitrários (útil para Tupperbox e webhooks). Aceita embeds, files, etc."""
+        default_allowed = AllowedMentions.none()
+        kwargs = self._norm_kwargs(kwargs, default_allowed)
+
         wh = await self.get_or_create(channel)
         uname = (username or "Proxy").strip()[:80]  # limite do Discord
+
         if wh:
             try:
                 await wh.send(
-                    text,
+                    content=text,
                     username=uname,
                     avatar_url=avatar_url or discord.utils.MISSING,
-                    allowed_mentions=allowed,
+                    wait=False,
+                    **kwargs,
                 )
                 return
             except Exception as e:
                 logging.warning("Webhook falhou em #%s (identity): %s — usando fallback.", channel.name, e)
-        await channel.send(f"**{uname}:** {text}", allowed_mentions=allowed)
+
+        await channel.send(
+            content=f"**{uname}:** {text}",
+            embeds=kwargs.get("embeds"),
+            allowed_mentions=kwargs.get("allowed_mentions", default_allowed),
+        )
