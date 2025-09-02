@@ -7,6 +7,8 @@ from discord.ext import commands
 import os
 import random
 from dataclasses import dataclass
+import re
+
 
 
 from evtranslator.config import (
@@ -53,7 +55,38 @@ def _build_embeds_and_links(atts: list[discord.Attachment]) -> tuple[list[discor
 
     return embeds, links
 
+# --- Reescrita de URLs proxied (ex.: i0.wp.com/media0.giphy.com/...) ---
+_URL_RE = re.compile(r'(https?://\S+)', re.IGNORECASE)
 
+def _unproxy_cdn_url(u: str) -> str:
+    """
+    Converte https://iX.wp.com/<host>/<path>[?qs] -> https://<host>/<path>
+    Mantém intacto se não for proxy do WP.
+    """
+    m = re.match(r'https?://i\d+\.wp\.com/([^?\s]+)', u, re.IGNORECASE)
+    if not m:
+        return u
+    target = m.group(1)  # ex.: media0.giphy.com/media/.../giphy.gif
+    if target.startswith('http://') or target.startswith('https://'):
+        return target
+    return 'https://' + target
+
+def _rewrite_proxied_image_urls_in_text(text: str) -> str:
+    """
+    Reescreve apenas URLs que parecem imagem (.png/.jpg/.jpeg/.gif/.webp),
+    para evitar mexer em links de página.
+    """
+    if not text:
+        return text
+
+    def _repl(m: re.Match) -> str:
+        url = m.group(1)
+        base = url.split('?', 1)[0].lower()
+        if any(base.endswith(ext) for ext in _IMG_EXTS):
+            return _unproxy_cdn_url(url)
+        return url
+
+    return _URL_RE.sub(_repl, text)
 
 
 
@@ -198,10 +231,18 @@ class RelayCog(commands.Cog):
             return
 
         text = (message.content or "").strip()
-        if len(text) < MIN_MSG_LEN:
+        has_atts = bool(message.attachments)
+        has_url  = ("http://" in text) or ("https://" in text)
+
+        # Permite seguir se tiver anexo ou URL, mesmo que o texto seja curto/vazio
+        if len(text) < MIN_MSG_LEN and not has_atts and not has_url:
             return
-        if len(text) > MAX_MSG_LEN:
-            text = text[:MAX_MSG_LEN] + " (…)"  # truncagem
+
+        # Truncagem só se houver texto
+        if text and len(text) > MAX_MSG_LEN:
+            text = text[:MAX_MSG_LEN] + " (…)"
+
+        should_translate = len(text) >= MIN_MSG_LEN  # só traduz se há texto “de verdade”
 
         # cooldowns de usuário e canal
         now = time.time()
@@ -267,96 +308,95 @@ class RelayCog(commands.Cog):
                 self.disabled_notice_ts[message.guild.id] = now
             return
 
-        # Depois de confirmar habilitação, podemos seguir com a cota
-        try:
-            allowed, remaining = await asyncio.to_thread(
-                consume_chars, message.guild.id, len(text)
-            )
-        except Exception as e:
-            logging.exception(
-                "Falha ao consumir cota no Supabase (guild=%s channel=%s msg_id=%s): %s",
-                message.guild.id, message.channel.id, message.id, e
-            )
-            return
-
-        if not allowed:
+        # Depois de confirmar habilitação, podemos seguir com a cota — APENAS SE for traduzir
+        if should_translate:
             try:
-                await message.channel.send(
-                    "⚠️ A cota de tradução deste servidor está esgotada por enquanto. "
-                    "Um admin pode ajustar o limite ou aguardar o reset mensal (`/quota`)."
+                allowed, remaining = await asyncio.to_thread(
+                    consume_chars, message.guild.id, len(text)
                 )
             except Exception as e:
-                logging.warning(
-                    "Falha ao enviar aviso de cota esgotada no canal (guild=%s channel=%s): %s",
-                    message.guild.id, message.channel.id, e
+                logging.exception(
+                    "Falha ao consumir cota no Supabase (guild=%s channel=%s msg_id=%s): %s",
+                    message.guild.id, message.channel.id, message.id, e
                 )
-            return
+                return
 
-        # Reconsulta números atualizados para alerta de 90%
-        try:
-            quota = await asyncio.to_thread(get_quota, message.guild.id)
-            char_limit = quota.get("char_limit") or 0
-            used_chars = quota.get("used_chars") or 0
-
-            # 🔔 Alerta de 90% de uso (DM para o dono, com fallback para 1º admin humano)
-            if (
-                char_limit
-                and used_chars >= 0.9 * char_limit
-                and message.guild.id not in self.warned_guilds
-            ):
-                self.warned_guilds.add(message.guild.id)
-                warning = (
-                    f"⚠️ Este servidor já consumiu {used_chars:,} de {char_limit:,} caracteres "
-                    f"(90% da cota mensal). Considere ajustar o limite ou aguardar o reset."
-                )
-
-                sent = False
-                # 1) tentar DM para o dono
+            if not allowed:
                 try:
-                    if message.guild.owner:
-                        await message.guild.owner.send(warning)
-                        sent = True
+                    await message.channel.send(
+                        "⚠️ A cota de tradução deste servidor está esgotada por enquanto. "
+                        "Um admin pode ajustar o limite ou aguardar o reset mensal (`/quota`)."
+                    )
                 except Exception as e:
                     logging.warning(
-                        "Falha ao enviar DM ao dono do servidor (guild=%s): %s",
-                        message.guild.id, e
+                        "Falha ao enviar aviso de cota esgotada no canal (guild=%s channel=%s): %s",
+                        message.guild.id, message.channel.id, e
+                    )
+                return
+
+            # Reconsulta números atualizados para alerta de 90%
+            try:
+                quota = await asyncio.to_thread(get_quota, message.guild.id)
+                char_limit = quota.get("char_limit") or 0
+                used_chars = quota.get("used_chars") or 0
+
+                # 🔔 Alerta de 90% de uso (DM para o dono, com fallback para 1º admin humano)
+                if (
+                    char_limit
+                    and used_chars >= 0.9 * char_limit
+                    and message.guild.id not in self.warned_guilds
+                ):
+                    self.warned_guilds.add(message.guild.id)
+                    warning = (
+                        f"⚠️ Este servidor já consumiu {used_chars:,} de {char_limit:,} caracteres "
+                        f"(90% da cota mensal). Considere ajustar o limite ou aguardar o reset."
                     )
 
-                # 2) fallback: primeiro admin humano
-                if not sent:
+                    sent = False
+                    # 1) tentar DM para o dono
                     try:
-                        admin = next(
-                            (m for m in message.guild.members
-                             if m.guild_permissions.administrator and not m.bot),
-                            None
-                        )
-                        if admin:
-                            await admin.send(warning)
+                        if message.guild.owner:
+                            await message.guild.owner.send(warning)
                             sent = True
                     except Exception as e:
                         logging.warning(
-                            "Falha ao enviar DM ao admin (fallback) (guild=%s): %s",
+                            "Falha ao enviar DM ao dono do servidor (guild=%s): %s",
                             message.guild.id, e
                         )
 
-                if not sent:
-                    logging.info(
-                        "Não foi possível notificar dono/admin sobre 90%% da cota em guild %s",
-                        message.guild.id,
-                    )
+                    # 2) fallback: primeiro admin humano
+                    if not sent:
+                        try:
+                            admin = next(
+                                (m for m in message.guild.members
+                                 if m.guild_permissions.administrator and not m.bot),
+                                None
+                            )
+                            if admin:
+                                await admin.send(warning)
+                                sent = True
+                        except Exception as e:
+                            logging.warning(
+                                "Falha ao enviar DM ao admin (fallback) (guild=%s): %s",
+                                message.guild.id, e
+                            )
 
-            # se voltou a ficar baixo (ex.: reset), limpa flag
-            if used_chars < 1000 and message.guild.id in self.warned_guilds:
-                self.warned_guilds.remove(message.guild.id)
+                    if not sent:
+                        logging.info(
+                            "Não foi possível notificar dono/admin sobre 90%% da cota em guild %s",
+                            message.guild.id,
+                        )
 
-        except Exception as e:
-            logging.exception(
-                "Falha ao consultar cota (pós-consumo) no Supabase (guild=%s channel=%s msg_id=%s): %s",
-                message.guild.id, message.channel.id, message.id, e
-            )
-            # não retorna; a tradução já foi autorizada, seguimos
+                # se voltou a ficar baixo (ex.: reset), limpa flag
+                if used_chars < 1000 and message.guild.id in self.warned_guilds:
+                    self.warned_guilds.remove(message.guild.id)
 
-
+            except Exception as e:
+                logging.exception(
+                    "Falha ao consultar cota (pós-consumo) no Supabase (guild=%s channel=%s msg_id=%s): %s",
+                    message.guild.id, message.channel.id, message.id, e
+                )
+                # não retorna; a tradução já foi autorizada, seguimos
 
         # Dedupe leve em modo-evento: drop de repetição curtinha por autor/canal
         if self.event_mode:
@@ -372,68 +412,94 @@ class RelayCog(commands.Cog):
     
 
         # --- traduz (com jitter, rate cap, timeout, backoff e breaker) ---
-        if self.cb.is_open:
-            logging.warning(
-                "CB open: pausando traduções por curto período (guild=%s ch=%s)",
-                message.guild.id, message.channel.id
-            )
-            return
+        translated = text if not should_translate else None  # anexo/link puro → não traduz
 
-        # jitter para desfazer sincronização (0..EV_JITTER_MS ms)
-        if self.jitter_ms > 0:
-            await asyncio.sleep(random.uniform(0, self.jitter_ms / 1000.0))
+        if should_translate:
+            if self.cb.is_open:
+                logging.warning(
+                    "CB open: pausando traduções por curto período (guild=%s ch=%s)",
+                    message.guild.id, message.channel.id
+                )
+                return
 
-        # respeita RPS cap global do provedor
-        await self.rate_limiter.acquire()
+            # jitter para desfazer sincronização (0..EV_JITTER_MS ms)
+            if self.jitter_ms > 0:
+                await asyncio.sleep(random.uniform(0, self.jitter_ms / 1000.0))
 
-        sem = getattr(self.bot, "sem", None)
-        if sem is None:
-            sem = asyncio.Semaphore(1)
+            # respeita RPS cap global do provedor
+            await self.rate_limiter.acquire()
 
-        bo = ExponentialBackoff(self.backoff_cfg)
-        translated = None
-        last_err = None
+            sem = getattr(self.bot, "sem", None)
+            if sem is None:
+                sem = asyncio.Semaphore(1)
 
-        for attempt in range(self.backoff_cfg.attempts):
-            try:
-                async with sem:
-                    translated = await asyncio.wait_for(
-                        google_web_translate(  # tua função real
-                            self.bot.http_session, text, src_lang, target_lang
-                        ),
-                        timeout=self.translate_timeout,
-                    )
-                self.cb.on_success()
-                break
-            except asyncio.TimeoutError as e:
-                last_err = e
-                self.cb.on_failure()
-            except Exception as e:
-                last_err = e
-                msg = str(e).lower()
-                if "429" in msg or "too many" in msg or "rate" in msg or "timeout" in msg or msg.startswith("5"):
-                    self.cb.on_failure()
-                else:
-                    logging.exception("Erro não recuperável na tradução: %r", e)
+            bo = ExponentialBackoff(self.backoff_cfg)
+            last_err = None
+
+            for attempt in range(self.backoff_cfg.attempts):
+                try:
+                    async with sem:
+                        translated = await asyncio.wait_for(
+                            google_web_translate(  # tua função real
+                                self.bot.http_session, text, src_lang, target_lang
+                            ),
+                            timeout=self.translate_timeout,
+                        )
+                    self.cb.on_success()
                     break
+                except asyncio.TimeoutError as e:
+                    last_err = e
+                    self.cb.on_failure()
+                except Exception as e:
+                    last_err = e
+                    msg = str(e).lower()
+                    if "429" in msg or "too many" in msg or "rate" in msg or "timeout" in msg or msg.startswith("5"):
+                        self.cb.on_failure()
+                    else:
+                        logging.exception("Erro não recuperável na tradução: %r", e)
+                        break
 
-            if attempt < self.backoff_cfg.attempts - 1:
-                await asyncio.sleep(bo.next_delay())
+                if attempt < self.backoff_cfg.attempts - 1:
+                    await asyncio.sleep(bo.next_delay())
 
-        if translated is None:
-            logging.warning(
-                "Tradução falhou apos %d tentativas (guild=%s ch=%s msg=%s) ultimo_erro=%r",
-                self.backoff_cfg.attempts, message.guild.id, message.channel.id, message.id, last_err
-            )
-            return
+            if translated is None:
+                logging.warning(
+                    "Tradução falhou apos %d tentativas (guild=%s ch=%s msg=%s) ultimo_erro=%r",
+                    self.backoff_cfg.attempts, message.guild.id, message.channel.id, message.id, last_err
+                )
+                return
 
+ 
 
         # --- envia via webhook (EMBED-ONLY) ---
         try:
-            conteudo = f"{translated}{TRANSLATED_FLAG}"
+            base_text = translated or ""  # pode ser "" (anexo puro)
 
-            # Monta embeds p/ imagens e links p/ demais anexos (preserva spoiler)
+            # Reescreve URLs proxied (ex.: i0.wp.com -> host original) no TEXTO
+            if base_text:
+                base_text = _rewrite_proxied_image_urls_in_text(base_text)
+
+            # 1) Embeds vindos de ANEXOS (mantemos)
             embeds, links_fallback = _build_embeds_and_links(message.attachments or [])
+            embeds = embeds[:10]  # hard cap Discord
+
+            # Reescreve URLs proxied também nos links de fallback (se houver)
+            if links_fallback:
+                links_fallback = [_unproxy_cdn_url(u) for u in links_fallback]
+
+            # 2) Não criar embed manual para URLs do TEXTO.
+            #    Só garante que o FLAG vá em nova linha para não grudar no link.
+            if ("http://" in base_text) or ("https://" in base_text):
+                conteudo = f"{base_text}\n{TRANSLATED_FLAG}"
+            else:
+                conteudo = f"{base_text}{TRANSLATED_FLAG}"
+
+            # kwargs SEM 'content' — conteúdo vai como POSICIONAL!
+            send_kwargs = {
+                "allowed_mentions": discord.AllowedMentions.none(),
+            }
+            if embeds:  # ⚠️ só inclui se houver; evita desabilitar auto-embed do link
+                send_kwargs["embeds"] = embeds
 
             # Anexa os links no final do texto (ou manda numa 2ª msg se passar 2000 chars)
             if links_fallback:
@@ -442,34 +508,53 @@ class RelayCog(commands.Cog):
                 if len(conteudo) + len(sufixo) <= MAX_MSG_LEN:
                     conteudo += sufixo
                 else:
-                    # envia corpo + embeds primeiro
+                    # envia corpo + (talvez) embeds primeiro — conteúdo POSICIONAL
                     try:
                         if is_proxy_msg:
                             username = message.author.name or message.author.display_name
                             avatar_url = str(message.author.display_avatar.url) if message.author.display_avatar else None
                             await self.bot.webhooks.send_as_identity(
                                 target_ch,
-                                username=username,
-                                avatar_url=avatar_url,
-                                text=conteudo,
-                                embeds=embeds,
-                                allowed_mentions=discord.AllowedMentions.none(),
+                                username,
+                                avatar_url,
+                                conteudo,   # <-- POSICIONAL (mantém nick/avatar)
+                                **send_kwargs,
                             )
                         else:
                             await self.bot.webhooks.send_as_member(
                                 target_ch,
                                 message.author,
-                                conteudo,
-                                embeds=embeds,
-                                allowed_mentions=discord.AllowedMentions.none(),  # type: ignore[attr-defined]
+                                conteudo,   # <-- POSICIONAL
+                                **send_kwargs,  # type: ignore[attr-defined]
                             )
                     except TypeError:
-                        # wrappers não aceitaram embeds/allowed_mentions → fallback simples
-                        await target_ch.send(content=conteudo, embeds=embeds, allowed_mentions=discord.AllowedMentions.none())
+                        # fallback direto no canal (preserva auto-embed se não houver embeds)
+                        await target_ch.send(
+                            content=conteudo,
+                            embeds=embeds if embeds else None,
+                            allowed_mentions=discord.AllowedMentions.none(),
+                        )
 
-                    # depois envia apenas os links
+                    # depois envia apenas os links (SEM embeds para não matar auto-embed)
                     conteudo = "**Anexos:**\n" + links_txt
-                    embeds = []
+                    if is_proxy_msg:
+                        username = message.author.name or message.author.display_name
+                        avatar_url = str(message.author.display_avatar.url) if message.author.display_avatar else None
+                        await self.bot.webhooks.send_as_identity(
+                            target_ch,
+                            username,
+                            avatar_url,
+                            conteudo,   # <-- POSICIONAL
+                            allowed_mentions=discord.AllowedMentions.none(),
+                        )
+                    else:
+                        await self.bot.webhooks.send_as_member(
+                            target_ch,
+                            message.author,
+                            conteudo,   # <-- POSICIONAL
+                            allowed_mentions=discord.AllowedMentions.none(),  # type: ignore[attr-defined]
+                        )
+                    return  # já enviou tudo
 
             # envio principal (tudo em UMA mensagem quando possível)
             if is_proxy_msg:
@@ -477,24 +562,26 @@ class RelayCog(commands.Cog):
                 avatar_url = str(message.author.display_avatar.url) if message.author.display_avatar else None
                 await self.bot.webhooks.send_as_identity(
                     target_ch,
-                    username=username,
-                    avatar_url=avatar_url,
-                    text=conteudo,
-                    embeds=embeds,
-                    allowed_mentions=discord.AllowedMentions.none(),
+                    username,
+                    avatar_url,
+                    conteudo,   # <-- POSICIONAL
+                    **send_kwargs,
                 )
             else:
                 await self.bot.webhooks.send_as_member(
                     target_ch,
                     message.author,
-                    conteudo,
-                    embeds=embeds,
-                    allowed_mentions=discord.AllowedMentions.none(),  # type: ignore[attr-defined]
+                    conteudo,   # <-- POSICIONAL
+                    **send_kwargs,  # type: ignore[attr-defined]
                 )
 
         except TypeError:
-            # wrappers não aceitam embeds/allowed_mentions → fallback p/ send()
-            await target_ch.send(content=conteudo, embeds=embeds, allowed_mentions=discord.AllowedMentions.none())
+            # wrappers não aceitam kwargs → fallback p/ send()
+            await target_ch.send(
+                content=conteudo,
+                embeds=embeds if embeds else None,
+                allowed_mentions=discord.AllowedMentions.none(),
+            )
         except Exception as e:
             logging.exception(
                 "Falha ao enviar via webhook (guild=%s channel=%s msg_id=%s): %s",
