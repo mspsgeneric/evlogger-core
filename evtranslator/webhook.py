@@ -17,17 +17,33 @@ class WebhookSender:
             hooks = await channel.webhooks()
             for h in hooks:
                 if h.user and h.user.id == self.bot_user_id:
+                    # 🔧 Normaliza nome e avatar "default" do webhook
+                    try:
+                        if h.name != "EVlogger Relay" or h.avatar is not None:
+                            # avatar=None remove o avatar default do webhook
+                            await h.edit(name="EVlogger Relay", avatar=None)
+                    except Exception:
+                        # não falha o fluxo se não conseguir editar
+                        pass
                     self.cache[channel.id] = h
                     return h
+
+            # não existe webhook nosso ainda → cria e já normaliza
             wh = await channel.create_webhook(name="EVlogger Relay")
+            try:
+                await wh.edit(avatar=None)  # garante avatar default neutro
+            except Exception:
+                pass
             self.cache[channel.id] = wh
             return wh
+
         except discord.Forbidden:
             logging.warning("Sem permissão para gerenciar webhooks em #%s", channel.name)
             return None
         except Exception as e:
             logging.warning("Falha ao obter/criar webhook em #%s: %s", channel.name, e)
             return None
+
 
     # ---------- NOVO: helper p/ normalizar kwargs ----------
     def _norm_kwargs(self, kwargs: dict, default_allowed: AllowedMentions) -> dict:
