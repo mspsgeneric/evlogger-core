@@ -4,12 +4,14 @@ import discord
 from typing import Optional  # ✅ único import
 from discord import AllowedMentions
 
-TARGET_NAME = "EVlogger Relay"  # ✅ constante
+# evtranslator/webhook.py
+TARGET_NAME = "EVlogger Relay"
 
 class WebhookSender:
-    def __init__(self, bot_user_id: Optional[int]):
+    def __init__(self, bot_user_id: Optional[int], default_avatar_bytes: Optional[bytes] = None):
         self.cache: dict[int, discord.Webhook] = {}
         self.bot_user_id = bot_user_id
+        self.default_avatar_bytes = default_avatar_bytes  # << avatar fixo do webhook (None = ícone neutro)
 
     async def get_or_create(self, channel: discord.TextChannel) -> Optional[discord.Webhook]:
         wh = self.cache.get(channel.id)
@@ -18,41 +20,37 @@ class WebhookSender:
         try:
             hooks = await channel.webhooks()
             target = None
-            # 1) Preferir nosso webhook pelo user.id (quando soubermos)
+
+            # ✅ só reutiliza se for webhook do PRÓPRIO BOT
             if self.bot_user_id is not None:
                 for h in hooks:
                     if h.user and h.user.id == self.bot_user_id:
                         target = h
                         break
-            # 2) Caso contrário, tentar pelo nome
-            if target is None:
-                for h in hooks:
-                    if (h.name or "").strip() == TARGET_NAME:
-                        target = h
-                        break
 
-            # 3) Se achou, mas SEM token, apaga e cria de novo (para ter token)
+            # se achou mas SEM token → recria
             if target is not None and target.token is None:
                 try:
-                    await target.delete(reason="Recreating to ensure token for execution")
+                    await target.delete(reason="Recreating to ensure token")
                 except Exception:
                     pass
                 target = None
 
-            # 4) Criar novo se não houver um válido/tokenizado
+            # se não achou válido → cria novo
             if target is None:
                 target = await channel.create_webhook(name=TARGET_NAME)
-                try:
-                    await target.edit(avatar=None)
-                except Exception:
-                    pass
 
-            # 5) Normaliza nome/avatar e cacheia
-            try:
-                if target.name != TARGET_NAME or target.avatar is not None:
-                    await target.edit(name=TARGET_NAME, avatar=None)
-            except Exception:
-                pass
+            # ✅ normaliza SEMPRE: nome + avatar FIXO do webhook
+            # Antes de editar:
+            needs_edit = (target.name != TARGET_NAME)
+            if self.default_avatar_bytes is None:
+                needs_edit = needs_edit or (target.avatar is not None)
+            else:
+                needs_edit = needs_edit or (target.avatar is None)
+
+            if needs_edit:
+                await target.edit(name=TARGET_NAME, avatar=self.default_avatar_bytes)
+
 
             self.cache[channel.id] = target
             return target
@@ -63,6 +61,7 @@ class WebhookSender:
         except Exception as e:
             logging.warning("Falha ao obter/criar webhook em #%s: %s", channel.name, e)
             return None
+
 
 
     def _norm_kwargs(self, kwargs: dict, default_allowed: AllowedMentions) -> dict:

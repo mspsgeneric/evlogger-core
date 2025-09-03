@@ -9,6 +9,7 @@ import random
 from dataclasses import dataclass
 import re
 
+from evtranslator.webhook import WebhookSender
 
 
 from evtranslator.config import (
@@ -189,6 +190,25 @@ class RelayCog(commands.Cog):
         # Dedupe leve (drop de mensagens idênticas curtinhas em janela)
         self.dedupe_window = float(os.getenv("EV_DEDUPE_WINDOW_SEC", "3.0"))
         self._last_hash_by_user_chan: dict[tuple[int,int], tuple[str,float]] = {}
+
+        # 🔗 WebhookSender para traduções normais (pop-up com avatar fixo do bot)
+        self.webhook_sender = WebhookSender(bot_user_id=None, default_avatar_bytes=None)
+        # expõe no bot para manter compat com self.bot.webhooks usados abaixo
+        setattr(self.bot, "webhooks", self.webhook_sender)
+
+    @commands.Cog.listener()
+    async def on_ready(self):
+        # injeta o id do bot no sender (para reconhecer webhooks do próprio bot)
+        if self.webhook_sender.bot_user_id is None and self.bot.user:
+            self.webhook_sender.bot_user_id = self.bot.user.id
+
+        # define avatar fixo do webhook = avatar do próprio bot (ou None para ícone neutro)
+        if self.webhook_sender.default_avatar_bytes is None and self.bot.user:
+            try:
+                self.webhook_sender.default_avatar_bytes = await self.bot.user.display_avatar.read()
+            except Exception:
+                self.webhook_sender.default_avatar_bytes = None
+
 
 
     @commands.Cog.listener()
