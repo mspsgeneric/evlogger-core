@@ -4,6 +4,9 @@ import discord
 from util.log_utils import coletar_e_enviar_log
 import logging
 
+import asyncio
+from discord import NotFound, Forbidden, HTTPException
+
 logger = logging.getLogger(__name__)
 
 # Decorador para administradores
@@ -24,6 +27,7 @@ class ConfirmarLimpeza(discord.ui.View):
         self.bot = bot
         self.interaction = interaction
 
+    
     @discord.ui.button(label="Confirmar limpeza", style=discord.ButtonStyle.danger)
     async def confirmar(self, interaction: discord.Interaction, button: discord.ui.Button):
         if interaction.user != self.interaction.user:
@@ -31,26 +35,41 @@ class ConfirmarLimpeza(discord.ui.View):
             return
 
         user = self.interaction.user
-        canal_original = self.interaction.channel
         guild = self.interaction.guild
+        channel_id = interaction.channel_id
+        bot = interaction.client
 
-        logger.info(
-            f"[LIMPAR_CANAL] Confirmação recebida por {user.name}#{user.discriminator} (ID: {user.id}) "
-            f"no canal '{canal_original.name}' do servidor '{guild.name}' (ID: {guild.id})"
-        )
-
+        # ACK cedo para evitar timeout
         await interaction.response.send_message("🕯️ EVlogger está usando Olhos do Passado…", ephemeral=True)
 
-        # 🔐 Verificação de segurança
-        if not isinstance(canal_original, discord.TextChannel):
-            logger.warning(
-                f"[LIMPAR_CANAL] Canal '{canal_original}' não é um canal de texto. Comando abortado por segurança."
-            )
-            await self.interaction.followup.send(
-                "❌ Este comando só pode ser usado em canais de texto.",
-                ephemeral=True
-            )
+        # Re-resolve o canal do zero (fresco), com pequeno retry
+        canal_original = None
+        for attempt in range(2):
+            canal_original = bot.get_channel(channel_id)
+            if canal_original is None:
+                try:
+                    canal_original = await bot.fetch_channel(channel_id)
+                except NotFound:
+                    # pequeno atraso e tenta de novo
+                    await asyncio.sleep(0.8)
+                    continue
+            break
+
+        if canal_original is None or not isinstance(canal_original, discord.TextChannel):
+            await self.interaction.followup.send("❌ Este comando só pode ser usado em canais de texto (ou o canal ficou indisponível).", ephemeral=True)
             return
+
+        # Checa permissões necessárias
+        me = canal_original.guild.get_member(bot.user.id)
+        perms = canal_original.permissions_for(me) if me else discord.Permissions.none()
+        if not perms.view_channel or not perms.read_message_history:
+            await self.interaction.followup.send("❌ Preciso de **View Channel** e **Read Message History** aqui.", ephemeral=True)
+            return
+
+        logger.info(
+            f"[LIMPAR_CANAL] Confirmação recebida por {user} (ID: {user.id}) "
+            f"no canal '{canal_original.name}' do servidor '{guild.name}' (ID: {guild.id})"
+        )
 
         try:
             resultado = await coletar_e_enviar_log(
@@ -58,53 +77,42 @@ class ConfirmarLimpeza(discord.ui.View):
                 user=user,
                 guild_id=str(guild.id)
             )
-
-        except Exception as e:
-            logger.error("[LIMPAR_CANAL] Erro ao coletar/enviar log:", exc_info=True)
+        except NotFound:
+            await self.interaction.followup.send("❌ Canal não encontrado durante a coleta (pode ter sido removido).", ephemeral=True)
+            return
+        except Forbidden:
+            await self.interaction.followup.send("❌ Sem permissão para ler o histórico.", ephemeral=True)
+            return
+        except Exception:
+            logger.exception("[LIMPAR_CANAL] Erro ao coletar/enviar log:")
             await self.interaction.followup.send("❌ Erro ao coletar ou enviar o log. Canal **não** foi limpo.", ephemeral=True)
             return
 
-        if not (resultado["email"] or resultado["dm"]):
-            logger.warning(f"[LIMPAR_CANAL] Falha ao enviar log (email: {resultado['email']}, dm: {resultado['dm']}). Canal não foi limpo.")
-
+        if not (resultado.get("email") or resultado.get("dm")):
             await self.interaction.followup.send("❌ Falha ao enviar o log por e-mail e DM. Canal **não** foi limpo.", ephemeral=True)
             return
 
-        
+        # Recriação → mensagem de sucesso ANTES de deletar
         try:
             categoria = canal_original.category
             posicao = canal_original.position
             overwrites = canal_original.overwrites
             nome = canal_original.name
-            
 
             novo_canal = await canal_original.guild.create_text_channel(
-                name=nome,
-                category=categoria,
-                position=posicao,
-                overwrites=overwrites
+                name=nome, category=categoria, position=posicao, overwrites=overwrites
             )
 
-            logger.info(
-                f"[LIMPAR_CANAL] Canal '{nome}' recriado com sucesso em '{guild.name}' (ID: {guild.id}) "
-                f"por {user.name}#{user.discriminator} (ID: {user.id})"
-            )
+            await self.interaction.followup.send("✅ Canal limpo com sucesso! O log foi enviado com segurança.", ephemeral=True)
 
-            # ✅ Enviar mensagem final ANTES de deletar o canal original
-            await self.interaction.followup.send(
-                "✅ Canal limpo com sucesso! O log foi enviado com segurança.",
-                ephemeral=True
-            )
-            self.stop()
+            # (Opcional) pequeno delay para garantir propagação antes de deletar
+            await asyncio.sleep(0.5)
 
             await canal_original.delete()
-
-        except Exception as e:
-            logger.error("[LIMPAR_CANAL] Erro ao recriar ou deletar canal:", exc_info=True)
-            await self.interaction.followup.send(
-                "❌ Ocorreu um erro ao tentar limpar o canal. Nenhuma alteração foi feita.",
-                ephemeral=True
-            )
+            self.stop()
+        except Exception:
+            logger.exception("[LIMPAR_CANAL] Erro ao recriar ou deletar canal:")
+            await self.interaction.followup.send("❌ Ocorreu um erro ao tentar limpar o canal. Nenhuma alteração foi feita.", ephemeral=True)
 
 
 async def setup(bot: commands.Bot):
