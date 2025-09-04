@@ -7,8 +7,8 @@ import logging
 from logging.handlers import TimedRotatingFileHandler
 from datetime import datetime, timedelta
 import discord
-from aiohttp import web
-from painel.routes import setup_painel_routes
+# from aiohttp import web
+# from painel.routes import setup_painel_routes
 
 
 # ===================== LOGGING =====================
@@ -112,27 +112,27 @@ def _bulk_update_guild_names_strict(bot_: commands.Bot) -> int:
 
 # ===================== EVTranslator (helpers mínimos) =====================
 
-async def init_translator_runtime():
-    """Inicializa recursos usados pelos cogs do EVTranslator (DB, sessão HTTP, semáforo)."""
-    from evtranslator.config import DB_PATH, CONCURRENCY
-    from evtranslator.db import init_db
-    import aiohttp
+# async def init_translator_runtime():
+#     """Inicializa recursos usados pelos cogs do EVTranslator (DB, sessão HTTP, semáforo)."""
+#     from evtranslator.config import DB_PATH, CONCURRENCY
+#     from evtranslator.db import init_db
+#     import aiohttp
 
-    await init_db(DB_PATH)
-    bot.sem = asyncio.Semaphore(CONCURRENCY)
-    bot.http_session = aiohttp.ClientSession(headers={"User-Agent": "Mozilla/5.0"})
+#     await init_db(DB_PATH)
+#     bot.sem = asyncio.Semaphore(CONCURRENCY)
+#     bot.http_session = aiohttp.ClientSession(headers={"User-Agent": "Mozilla/5.0"})
 
-async def load_translator_cogs():
-    """Registra os cogs do EVTranslator sem mexer na arquitetura do EVLogger."""
-    from evtranslator.cogs.links import LinksCog
-    from evtranslator.cogs.relay import RelayCog
-    from evtranslator.cogs.events import EventsCog
-    from evtranslator.cogs.quota import Quota
+# async def load_translator_cogs():
+#     """Registra os cogs do EVTranslator sem mexer na arquitetura do EVLogger."""
+#     from evtranslator.cogs.links import LinksCog
+#     from evtranslator.cogs.relay import RelayCog
+#     from evtranslator.cogs.events import EventsCog
+#     from evtranslator.cogs.quota import Quota
 
-    await bot.add_cog(LinksCog(bot))
-    await bot.add_cog(RelayCog(bot))
-    await bot.add_cog(EventsCog(bot))
-    await bot.add_cog(Quota(bot))
+#     await bot.add_cog(LinksCog(bot))
+#     await bot.add_cog(RelayCog(bot))
+#     await bot.add_cog(EventsCog(bot))
+#     await bot.add_cog(Quota(bot))
 
 # ===================== API de verificação =====================
 
@@ -209,14 +209,14 @@ async def on_ready():
     print(f"🤖 Bot conectado como {bot.user}")
 
     # Inicializa o WebhookSender usado pelo tradutor (somente após login)
-    try:
-        if not hasattr(bot, "webhooks") or getattr(bot, "webhooks", None) is None:
-            from evtranslator.webhook import WebhookSender
-            bot.webhooks = WebhookSender(bot_user_id=bot.user.id)  # type: ignore[attr-defined]
-    except Exception as e:
-        logging.warning(f"Falha ao inicializar WebhookSender: {e}")
+    # try:
+    #     if not hasattr(bot, "webhooks") or getattr(bot, "webhooks", None) is None:
+    #         from evtranslator.webhook import WebhookSender
+    #         bot.webhooks = WebhookSender(bot_user_id=bot.user.id)  # type: ignore[attr-defined]
+    # except Exception as e:
+    #     logging.warning(f"Falha ao inicializar WebhookSender: {e}")
 
-    await asyncio.sleep(3)  # evita corridas no início com muitos servidores
+    # await asyncio.sleep(3)  # evita corridas no início com muitos servidores
 
     if ENV != "dev":
         # 1) Atualiza NOME dos servidores cadastrados (modo estrito: só se já existirem)
@@ -255,21 +255,21 @@ async def on_ready():
         print(f"⚠️ Erro ao sincronizar comandos: {e}")
 
     # API de verificação
-    async def iniciar_api_verificacao():
-        app = web.Application()
-        app.router.add_post("/verificar_acesso", verificar_acesso)
+    # async def iniciar_api_verificacao():
+    #     app = web.Application()
+    #     app.router.add_post("/verificar_acesso", verificar_acesso)
 
-        # injeta o cliente supabase já criado no main
-        setup_painel_routes(app, supabase)
+    #     # injeta o cliente supabase já criado no main
+    #     setup_painel_routes(app, supabase)
 
-        runner = web.AppRunner(app)
-        await runner.setup()
-        site = web.TCPSite(runner, "0.0.0.0", 8937)
-        await site.start()
-        print("🔐 API pública: http://0.0.0.0:8937/verificar_acesso")
-        print("🛠️ Painel admin: http://0.0.0.0:8937/admin/guilds")
+    #     runner = web.AppRunner(app)
+    #     await runner.setup()
+    #     site = web.TCPSite(runner, "0.0.0.0", 8937)
+    #     await site.start()
+    #     print("🔐 API pública: http://0.0.0.0:8937/verificar_acesso")
+    #     print("🛠️ Painel admin: http://0.0.0.0:8937/admin/guilds")
 
-    asyncio.create_task(iniciar_api_verificacao())
+    # asyncio.create_task(iniciar_api_verificacao())
 
     # Agenda o fetch/parse diário (03:17)
     if not getattr(bot, "_bylaws_job_started", False):
@@ -345,7 +345,7 @@ async def load_commands():
         "comandos.pptbd",
         "comandos.custom_conteudo",
         "comandos.ver_wiki",
-        "comandos.clonar",
+        
     ]
     loaded, failed = 0, 0
     for ext in exts:
@@ -365,8 +365,8 @@ async def load_commands():
 async def main():
     await load_commands()
     # ====== EVTranslator: inicializa runtime + registra cogs ======
-    await init_translator_runtime()
-    await load_translator_cogs()
+    # await init_translator_runtime()
+    # await load_translator_cogs()
     # =============================================================
     try:
         await bot.start(TOKEN)

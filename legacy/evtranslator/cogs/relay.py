@@ -607,5 +607,3 @@ class RelayCog(commands.Cog):
                 "Falha ao enviar via webhook (guild=%s channel=%s msg_id=%s): %s",
                 message.guild.id, message.channel.id, message.id, e
             )
-
-

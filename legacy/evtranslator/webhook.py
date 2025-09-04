@@ -13,6 +13,7 @@ class WebhookSender:
         self.bot_user_id = bot_user_id
         self.default_avatar_bytes = default_avatar_bytes  # << avatar fixo do webhook (None = ícone neutro)
 
+    
     async def get_or_create(self, channel: discord.TextChannel) -> Optional[discord.Webhook]:
         wh = self.cache.get(channel.id)
         if wh:
@@ -40,17 +41,10 @@ class WebhookSender:
             if target is None:
                 target = await channel.create_webhook(name=TARGET_NAME)
 
-            # ✅ normaliza SEMPRE: nome + avatar FIXO do webhook
-            # Antes de editar:
-            needs_edit = (target.name != TARGET_NAME)
-            if self.default_avatar_bytes is None:
-                needs_edit = needs_edit or (target.avatar is not None)
-            else:
-                needs_edit = needs_edit or (target.avatar is None)
-
+            # ✅ normaliza SEMPRE: nome + avatar NEUTRO (None)
+            needs_edit = (target.name != TARGET_NAME) or (target.avatar is not None)
             if needs_edit:
-                await target.edit(name=TARGET_NAME, avatar=self.default_avatar_bytes)
-
+                await target.edit(name=TARGET_NAME, avatar=None)  # pop-up neutro
 
             self.cache[channel.id] = target
             return target
