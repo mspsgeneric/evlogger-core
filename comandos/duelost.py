@@ -94,92 +94,137 @@ class EscolhaJogadorView(discord.ui.View):
 
 
 class SelecionarUsuarios(discord.ui.View):
-    """View com UserSelect para o ST escolher participantes diretamente no Discord."""
-    def __init__(self, channel: discord.TextChannel, max_users: int = 50, timeout: float = 120.0):
+    """Seleção paginada mostrando apenas membros com acesso ao canal (sem bots)."""
+    PER_PAGE = 25
+
+    def __init__(
+        self,
+        channel: discord.TextChannel,
+        candidatos: List[discord.Member],   # já filtrados por permissão e sem bots
+        max_users: int = 50,
+        timeout: float = 180.0,
+    ):
         super().__init__(timeout=timeout)
         self.channel = channel
         self.max_users = max_users
+        self.candidatos = candidatos
+        self.page = 0
+        self.selecionados_ids: set[int] = set()  # acumula seleção entre páginas
         self.selecionados: List[discord.Member] | None = None
 
-        self.user_select = discord.ui.UserSelect(
-            placeholder="Selecione os participantes… (bots serão ignorados)",
-            min_values=1,
-            max_values=min(25, max_users),
-        )
-        self.add_item(self.user_select)
+        if not self.candidatos:
+            # cria um botão inerte só para sinalizar vazio
+            self.add_item(discord.ui.Button(label="Nenhum candidato com acesso ao canal", disabled=True))
+        else:
+            self._montar_pagina()
 
-        # ✅ Evita "Esta interação falhou" ao mudar a seleção
-        async def _noop(i: discord.Interaction):
+    # ---------- construção dinâmica dos componentes ----------
+    def _montar_pagina(self):
+        # remove tudo e recria a UI da página atual
+        for c in list(self.children):
+            self.remove_item(c)
+
+        inicio = self.page * self.PER_PAGE
+        fim = inicio + self.PER_PAGE
+        pagina = self.candidatos[inicio:fim]
+
+        # Select com nomes desta página
+        select = discord.ui.StringSelect(
+            placeholder=f"Página {self.page+1}/{self._total_paginas()} — selecione participantes…",
+            min_values=0,
+            max_values=len(pagina) if len(pagina) > 0 else 1,
+        )
+        # Mapeia member.id → option.value (string)
+        for m in pagina:
+            nome = m.display_name if m.display_name else m.name
+            select.add_option(label=nome[:100], value=str(m.id), description=f"@{m.name}"[:100])
+
+        async def _on_select(i: discord.Interaction):
+            # acumula seleção desta página
+            for vid in i.data.get("values", []):
+                self.selecionados_ids.add(int(vid))
+            # apenas ack; não mudamos a mensagem aqui
             try:
                 await i.response.defer()
             except Exception:
                 pass
-        self.user_select.callback = _noop
 
-    
-    @discord.ui.button(label="Confirmar", style=discord.ButtonStyle.primary)
-    async def confirmar(self, interaction: discord.Interaction, _: discord.ui.Button):
-        guild = interaction.guild
-        author = interaction.user
+        select.callback = _on_select
+        self.add_item(select)
 
-        valores = list(self.user_select.values)
-        membros: List[discord.Member] = []
-        ignorados_bots = 0
-        ignorados_perm = 0
+        # navegação
+        prev_disabled = (self.page == 0)
+        next_disabled = (self.page >= self._total_paginas() - 1)
 
-        for v in valores:
-            m = v if isinstance(v, discord.Member) else (guild.get_member(v.id) if guild else None)
-            if not m:
-                continue
-            if m.bot:
-                ignorados_bots += 1
-                continue
-            # ✅ agora o autor PODE participar (sem filtro m.id == author.id)
-            perms = self.channel.permissions_for(m)
-            if not (perms.view_channel and perms.send_messages):
-                ignorados_perm += 1
-                continue
-            membros.append(m)
+        @discord.ui.button(label="⬅️ Anterior", style=discord.ButtonStyle.secondary, disabled=prev_disabled)
+        async def _prev(i: discord.Interaction, _):
+            self.page -= 1
+            try:
+                await i.response.defer()
+            except Exception:
+                pass
+            self._montar_pagina()
+            await i.edit_original_response(view=self)
 
-        # remove duplicados preservando ordem
-        vistos = set()
-        membros = [m for m in membros if (m.id not in vistos and not vistos.add(m.id))]
+        @discord.ui.button(label="Selecionar todos desta página", style=discord.ButtonStyle.secondary)
+        async def _add_all(i: discord.Interaction, _):
+            for m in pagina:
+                self.selecionados_ids.add(m.id)
+            try:
+                await i.response.defer()
+            except Exception:
+                pass
 
-        if not membros:
-            await interaction.response.send_message(
-                "Selecione ao menos 1 participante humano com acesso ao canal.",
-                ephemeral=True
+        @discord.ui.button(label="Próxima ➡️", style=discord.ButtonStyle.secondary, disabled=next_disabled)
+        async def _next(i: discord.Interaction, _):
+            self.page += 1
+            try:
+                await i.response.defer()
+            except Exception:
+                pass
+            self._montar_pagina()
+            await i.edit_original_response(view=self)
+
+        # ações finais
+        @discord.ui.button(label="Confirmar", style=discord.ButtonStyle.primary)
+        async def _confirm(i: discord.Interaction, _):
+            # Converte o set de IDs em Members, preservando ordem relativa da lista original
+            idset = set(self.selecionados_ids)
+            membros = [m for m in self.candidatos if m.id in idset]
+
+            if not membros:
+                await i.response.send_message("Selecione ao menos 1 participante.", ephemeral=True)
+                return
+
+            # aplica o limite max_users
+            membros = membros[: self.max_users]
+            self.selecionados = membros
+
+            # desabilita tudo e confirma
+            for c in self.children:
+                if hasattr(c, "disabled"):
+                    c.disabled = True
+            await i.response.edit_message(
+                content=f"✅ Participantes confirmados: {len(self.selecionados)}.",
+                view=self
             )
-            return
+            self.stop()
 
-        self.selecionados = membros[: self.max_users]
-        for c in self.children:
-            if hasattr(c, "disabled"):
-                c.disabled = True
+        @discord.ui.button(label="Cancelar", style=discord.ButtonStyle.secondary)
+        async def _cancel(i: discord.Interaction, _):
+            self.selecionados = None
+            for c in self.children:
+                if hasattr(c, "disabled"):
+                    c.disabled = True
+            await i.response.edit_message(content="Operação cancelada.", view=self)
+            self.stop()
 
-        # feedback de quem foi ignorado
-        notas = []
-        if ignorados_bots:
-            notas.append(f"{ignorados_bots} bot(s)")
-        if ignorados_perm:
-            notas.append(f"{ignorados_perm} sem permissão no canal")
-        nota_txt = f" (ignorado: {', '.join(notas)})" if notas else ""
-
-        await interaction.response.edit_message(
-            content=f"✅ Participantes confirmados: {len(self.selecionados)}{nota_txt}.",
-            view=self
-        )
-        self.stop()
+    def _total_paginas(self) -> int:
+        if not self.candidatos:
+            return 1
+        return (len(self.candidatos) + self.PER_PAGE - 1) // self.PER_PAGE
 
 
-    @discord.ui.button(label="Cancelar", style=discord.ButtonStyle.secondary)
-    async def cancelar(self, interaction: discord.Interaction, _: discord.ui.Button):
-        self.selecionados = None
-        for c in self.children:
-            if hasattr(c, "disabled"):
-                c.disabled = True
-        await interaction.response.edit_message(content="Operação cancelada.", view=self)
-        self.stop()
 
 
 class DuelosST(commands.Cog):
@@ -312,7 +357,33 @@ class DuelosST(commands.Cog):
             return
 
         # === Selecionar participantes (sempre via seletor) ===
-        view = SelecionarUsuarios(channel=interaction.channel, max_users=50, timeout=120.0)
+        ch: discord.TextChannel = interaction.channel
+        guild = interaction.guild
+
+        # (opcional) garante o cache completo de membros
+        try:
+            _ = [m async for m in guild.fetch_members(limit=None)]
+        except Exception:
+            pass
+
+        # só candidatos com acesso ao canal (sem bots)
+        candidatos: List[discord.Member] = []
+        for m in guild.members:
+            if m.bot:
+                continue
+            perms = ch.permissions_for(m)
+            if perms.view_channel and perms.send_messages:
+                candidatos.append(m)
+
+        if not candidatos:
+            await interaction.response.send_message(
+                "Não há membros humanos com acesso a este canal para selecionar.",
+                ephemeral=True
+            )
+            return
+
+        # abre o seletor paginado com **apenas** os candidatos do canal
+        view = SelecionarUsuarios(channel=ch, candidatos=candidatos, max_users=50, timeout=180.0)
         await interaction.response.send_message(
             "Selecione os participantes do Duelost e confirme:",
             view=view,
@@ -328,6 +399,7 @@ class DuelosST(commands.Cog):
             return
 
         participantes: List[discord.Member] = view.selecionados
+
 
         # Prepara estado do duelo (commit-reveal)
         duelo_id = interaction.id  # único por invocação
