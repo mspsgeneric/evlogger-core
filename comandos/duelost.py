@@ -201,7 +201,11 @@ class SelecionarUsuarios(discord.ui.View):
                 await i.response.send_message("Selecione ao menos 1 participante.", ephemeral=True)
                 return
             idset = set(self.selecionados_ids)
-            membros = [m for m in self.candidatos if m.id in idset]
+            membros: List[discord.Member] = []
+            for m in self.candidatos:
+                if m.id in idset and self.channel.permissions_for(m).view_channel:
+                    membros.append(m)
+
             self.selecionados = membros[: self.max_users]
             # desativa tudo
             for c in self.children:
@@ -370,24 +374,36 @@ class DuelosST(commands.Cog):
         ch: discord.TextChannel = interaction.channel
         guild = interaction.guild
 
-        # (opcional) garante cache completo
+        # (opcional) garante cache completo de membros para que ch.members reflita tudo
         try:
             _ = [m async for m in guild.fetch_members(limit=None)]
         except Exception:
             pass
 
-        # só membros com acesso ao canal; sem bots
+        # 📌 Somente quem PODE VER o canal (inclui offline)
+        ids_vistos: set[int] = set()
         candidatos: List[discord.Member] = []
-        for m in guild.members:
+
+        # 1) comece pelos que o Discord já lista para o canal
+        for m in ch.members:
             if m.bot:
                 continue
-            perms = ch.permissions_for(m)
-            if perms.view_channel and perms.send_messages:
+            candidatos.append(m)
+            ids_vistos.add(m.id)
+
+        # 2) complete com offline que veem o canal, mas não vieram em ch.members
+        for m in guild.members:
+            if m.bot or m.id in ids_vistos:
+                continue
+            if ch.permissions_for(m).view_channel:
                 candidatos.append(m)
+                ids_vistos.add(m.id)
+
 
         if not candidatos:
             await interaction.response.send_message(
-                "Não há membros humanos com acesso a este canal para selecionar.", ephemeral=True
+                "Não há membros humanos com acesso a este canal para selecionar.",
+                ephemeral=True
             )
             return
 
@@ -407,6 +423,7 @@ class DuelosST(commands.Cog):
             return
 
         participantes: List[discord.Member] = view.selecionados
+
 
 
 
@@ -537,7 +554,7 @@ class DuelosST(commands.Cog):
                 f"- {m.mention}: {EMOJI[jog]} {jog.capitalize()}" + (" *(aleatório)*" if ale else "") + f" → {tag}"
             )
         texto_detalhado = "\n".join(detalhado_linhas)
-        return texto_detalhado, texto_resumo  # (não usado diretamente; mantido pela estrutura)
+        return texto_resumo, texto_detalhado
 
 async def setup(bot: commands.Bot):
     await bot.add_cog(DuelosST(bot))
