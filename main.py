@@ -345,6 +345,7 @@ async def load_commands():
         "comandos.pptbd",
         "comandos.custom_conteudo",
         "comandos.ver_wiki",
+        "comandos.duelost",
         
     ]
     loaded, failed = 0, 0
