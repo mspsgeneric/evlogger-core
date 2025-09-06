@@ -147,10 +147,9 @@ class SelecionarUsuarios(discord.ui.View):
             select.add_option(label=nome, value=str(m.id), description=desc)
 
         async def _on_select(i: discord.Interaction):
-            # adiciona IDs selecionados nesta página
+            # adiciona IDs selecionados nesta página (acumula entre páginas)
             for vid in i.data.get("values", []):
                 self.selecionados_ids.add(int(vid))
-            # só confirma a interação
             try:
                 await i.response.defer()
             except Exception:
@@ -159,16 +158,14 @@ class SelecionarUsuarios(discord.ui.View):
         select.callback = _on_select
         self.add_item(select)
 
-        # Botões (criados dinamicamente)
+        # Botões (sem "Selecionar todos")
         prev_disabled = (self.page == 0)
         next_disabled = (self.page >= self._total_paginas() - 1)
 
         prev_btn    = discord.ui.Button(label="⬅️ Anterior", style=discord.ButtonStyle.secondary, disabled=prev_disabled)
-        add_all_btn = discord.ui.Button(label="Selecionar todos desta página", style=discord.ButtonStyle.secondary)
         next_btn    = discord.ui.Button(label="Próxima ➡️", style=discord.ButtonStyle.secondary, disabled=next_disabled)
         confirm_btn = discord.ui.Button(label="Confirmar", style=discord.ButtonStyle.primary)
         cancel_btn  = discord.ui.Button(label="Cancelar", style=discord.ButtonStyle.secondary)
-
 
         async def _prev_cb(i: discord.Interaction):
             self.page -= 1
@@ -188,26 +185,13 @@ class SelecionarUsuarios(discord.ui.View):
             self._montar_pagina()
             await i.edit_original_response(view=self)
 
-        async def _add_all_cb(i: discord.Interaction):
-            for m in pagina:
-                self.selecionados_ids.add(m.id)
-            try:
-                await i.response.defer()
-            except Exception:
-                pass
-
         async def _confirm_cb(i: discord.Interaction):
             if not self.selecionados_ids:
                 await i.response.send_message("Selecione ao menos 1 participante.", ephemeral=True)
                 return
             idset = set(self.selecionados_ids)
-            membros: List[discord.Member] = []
-            for m in self.candidatos:
-                if m.id in idset and self.channel.permissions_for(m).view_channel:
-                    membros.append(m)
-
+            membros = [m for m in self.candidatos if m.id in idset]
             self.selecionados = membros[: self.max_users]
-            # desativa tudo
             for c in self.children:
                 if hasattr(c, "disabled"):
                     c.disabled = True
@@ -225,17 +209,16 @@ class SelecionarUsuarios(discord.ui.View):
             await i.response.edit_message(content="Operação cancelada.", view=self)
             self.stop()
 
-        prev_btn.callback = _prev_cb
-        next_btn.callback = _next_cb
-        add_all_btn.callback = _add_all_cb
+        prev_btn.callback    = _prev_cb
+        next_btn.callback    = _next_cb
         confirm_btn.callback = _confirm_cb
-        cancel_btn.callback = _cancel_cb
+        cancel_btn.callback  = _cancel_cb
 
         self.add_item(prev_btn)
-        self.add_item(add_all_btn)
         self.add_item(next_btn)
         self.add_item(confirm_btn)
         self.add_item(cancel_btn)
+
 
 
 
@@ -330,7 +313,40 @@ class DuelosST(commands.Cog):
             )
         texto_detalhado = "\n".join(linhas_detalhe)
         return texto_resumo, texto_detalhado
+    
+    def _chunk_with_header(self, header: str, lines: List[str], max_chars: int = 1900) -> List[str]:
+        """Quebra em páginas mantendo o header em cada página. max_chars < 2000 por segurança."""
+        pages: List[str] = []
+        cur = header
+        for ln in lines:
+            add = ("\n" if cur else "") + ln
+            if len(cur) + len(add) > max_chars:
+                pages.append(cur)
+                cur = f"{header} (cont.)\n{ln}"
+            else:
+                cur += add
+        if cur:
+            pages.append(cur)
+        return pages
 
+    async def _send_chunked_text(self, channel: discord.TextChannel, text: str):
+        """Divide o texto por linhas e envia paginado com um header repetido."""
+        lines = text.split("\n")
+        if not lines:
+            return
+        header = lines[0]
+        body = lines[1:]
+        # se couber inteiro, manda de uma vez
+        if len(text) <= 2000:
+            await channel.send(text)
+            return
+        # senão, pagina
+        for page in self._chunk_with_header(header, body):
+            await channel.send(page)
+
+    
+
+    
     
     @app_commands.command(
         name="duelost",
@@ -340,7 +356,7 @@ class DuelosST(commands.Cog):
         sinal_st="Sinal do ST (pedra, papel, tesoura, bomba).",
         tempo="Tempo (segundos) para respostas (padrão: 60).",
         permitir_bomba="Permitir que os jogadores escolham bomba (padrão: não).",
-        detalhar="Incluir bloco detalhado por jogador (padrão: não).",
+        detalhar="Incluir bloco detalhado por jogador (padrão: sim).",
     )
     @app_commands.choices(
         sinal_st=[
@@ -381,9 +397,9 @@ class DuelosST(commands.Cog):
             await interaction.response.send_message("❌ Apenas administradores/gestores podem iniciar o Duelost.", ephemeral=True)
             return
 
-        # Converte as choices “Sim/Não” em bool; padrão = Não (False)
-        permitir_bomba_b = (permitir_bomba.value == "sim") if permitir_bomba else False
-        detalhar_b       = (detalhar.value == "sim")       if detalhar       else False
+        # Converte as choices “Sim/Não” em bool
+        permitir_bomba_b = (permitir_bomba.value == "sim") if permitir_bomba else False   # padrão: NÃO
+        detalhar_b       = (detalhar.value == "sim")       if detalhar       else True    # padrão: SIM
 
         # === Selecionar participantes (sempre via seletor paginado) ===
         ch: discord.TextChannel = interaction.channel
@@ -397,7 +413,7 @@ class DuelosST(commands.Cog):
         except Exception:
             fetch_ok = False  # provável: intent de membros desativada
 
-        # 📌 Só quem PODE VER o canal (inclui offline)
+        # Só quem PODE VER o canal (inclui offline)
         ids_vistos: set[int] = set()
         candidatos: List[discord.Member] = []
 
@@ -425,7 +441,6 @@ class DuelosST(commands.Cog):
                     ephemeral=True
                 )
                 return
-            # fallback mínimo: permite selecionar o próprio narrador (pra teste)
             if not user.bot and ch.permissions_for(user).view_channel:
                 candidatos = [user]
             else:
@@ -471,7 +486,7 @@ class DuelosST(commands.Cog):
         }
         self.duelos[duelo_id] = estado
 
-        # ⚠️ Agora use FOLLOWUP (response já foi usado acima)
+        # Agora use FOLLOWUP (response já foi usado acima)
         await interaction.followup.send(
             f"⚔️ **Duelost iniciado!** Participantes: {len(participantes)}\n"
             f"Tempo: {tempo}s\n"
@@ -505,15 +520,17 @@ class DuelosST(commands.Cog):
             nonce=estado["nonce"],
         )
 
-        # Publica resultado final no canal
+        # Publica resultado final no canal (com paginação automática)
         if detalhar_b:
-            await interaction.channel.send(texto_resumo)
-            await interaction.channel.send(texto_detalhe)
+            await self._send_chunked_text(interaction.channel, texto_resumo)
+            await self._send_chunked_text(interaction.channel, texto_detalhe)
         else:
-            await interaction.channel.send(texto_resumo)
+            await self._send_chunked_text(interaction.channel, texto_resumo)
+
 
         # Limpa estado
         self.duelos.pop(duelo_id, None)
+
 
 
     def _montar_resposta_formatada(
@@ -539,6 +556,7 @@ class DuelosST(commands.Cog):
     ) -> Tuple[str, str]:
         return self._formatar_resumo_impl(sinal_st, participantes, escolhas)
 
+    
     @staticmethod
     def _formatar_resumo_impl(
         sinal_st: str,
@@ -549,7 +567,7 @@ class DuelosST(commands.Cog):
         for m in participantes:
             jog, ale = escolhas.get(m.id, (randchoice(OPCOES_PPT), True))
             r = resultado(jog, sinal_st)
-            entrada = f"{m.mention} ({EMOJI[jog]})" + (" *(aleatório)*" if ale else "")
+            entrada = f"{m.mention} ({EMOJI[jog]})" + (" (aleatório)" if ale else "")
             if r == "jogador1":
                 venceu.append(entrada)
             elif r == "jogador2":
@@ -557,6 +575,7 @@ class DuelosST(commands.Cog):
             else:
                 empatou.append(entrada)
 
+        # Bloco RESUMO (mantém como estava)
         resumo_linhas = [
             f"**ST**: {EMOJI[sinal_st]} {sinal_st.capitalize()}",
             f"**Venceu ({len(venceu)})**: " + (", ".join(venceu) if venceu else "—"),
@@ -565,7 +584,8 @@ class DuelosST(commands.Cog):
         ]
         texto_resumo = "⚔️ **Duelost — Todos vs ST**\n" + "\n".join(resumo_linhas)
 
-        detalhado_linhas = ["\n**Detalhe por jogador**"]
+        # Bloco DETALHADO no formato pedido
+        detalhado_linhas = ["Detalhe por jogador"]
         for m in participantes:
             jog, ale = escolhas.get(m.id, (randchoice(OPCOES_PPT), True))
             r = resultado(jog, sinal_st)
@@ -575,11 +595,14 @@ class DuelosST(commands.Cog):
                 tag = "🟥 Perdeu"
             else:
                 tag = "🟨 Empatou"
+            mov = f"{EMOJI[jog]} {jog.capitalize()}"
             detalhado_linhas.append(
-                f"- {m.mention}: {EMOJI[jog]} {jog.capitalize()}" + (" *(aleatório)*" if ale else "") + f" → {tag}"
+                f"{m.mention}: {mov}" + (" (aleatório)" if ale else "") + f" → {tag}"
             )
+
         texto_detalhado = "\n".join(detalhado_linhas)
         return texto_resumo, texto_detalhado
+
 
 async def setup(bot: commands.Bot):
     await bot.add_cog(DuelosST(bot))
