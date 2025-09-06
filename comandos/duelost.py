@@ -331,6 +331,7 @@ class DuelosST(commands.Cog):
         texto_detalhado = "\n".join(linhas_detalhe)
         return texto_resumo, texto_detalhado
 
+    
     @app_commands.command(
         name="duelost",
         description="Todos vs ST: o narrador escolhe um sinal, vários jogadores respondem (PPTB)."
@@ -338,8 +339,8 @@ class DuelosST(commands.Cog):
     @app_commands.describe(
         sinal_st="Sinal do ST (pedra, papel, tesoura, bomba).",
         tempo="Tempo (segundos) para respostas (padrão: 60).",
-        permitir_bomba="Permitir que os jogadores escolham bomba (padrão: true).",
-        detalhar="Incluir bloco detalhado por jogador (padrão: true).",
+        permitir_bomba="Permitir que os jogadores escolham bomba (padrão: não).",
+        detalhar="Incluir bloco detalhado por jogador (padrão: não).",
     )
     @app_commands.choices(
         sinal_st=[
@@ -349,13 +350,23 @@ class DuelosST(commands.Cog):
             app_commands.Choice(name="Bomba 💣", value="bomba"),
         ]
     )
+    @app_commands.choices(
+        permitir_bomba=[
+            app_commands.Choice(name="Sim", value="sim"),
+            app_commands.Choice(name="Não", value="nao"),
+        ],
+        detalhar=[
+            app_commands.Choice(name="Sim", value="sim"),
+            app_commands.Choice(name="Não", value="nao"),
+        ],
+    )
     async def duelost(
         self,
         interaction: discord.Interaction,
         sinal_st: app_commands.Choice[str],
         tempo: int = 60,
-        permitir_bomba: bool = True,
-        detalhar: bool = True,
+        permitir_bomba: app_commands.Choice[str] | None = None,
+        detalhar: app_commands.Choice[str] | None = None,
     ):
         # Restrições básicas
         if interaction.guild is None or not isinstance(interaction.channel, discord.TextChannel):
@@ -370,6 +381,10 @@ class DuelosST(commands.Cog):
             await interaction.response.send_message("❌ Apenas administradores/gestores podem iniciar o Duelost.", ephemeral=True)
             return
 
+        # Converte as choices “Sim/Não” em bool; padrão = Não (False)
+        permitir_bomba_b = (permitir_bomba.value == "sim") if permitir_bomba else False
+        detalhar_b       = (detalhar.value == "sim")       if detalhar       else False
+
         # === Selecionar participantes (sempre via seletor paginado) ===
         ch: discord.TextChannel = interaction.channel
         guild = interaction.guild
@@ -380,7 +395,7 @@ class DuelosST(commands.Cog):
             async for _ in guild.fetch_members(limit=None):
                 pass
         except Exception:
-            fetch_ok = False  # provavel: intent de membros desativada
+            fetch_ok = False  # provável: intent de membros desativada
 
         # 📌 Só quem PODE VER o canal (inclui offline)
         ids_vistos: set[int] = set()
@@ -420,7 +435,6 @@ class DuelosST(commands.Cog):
                 )
                 return
 
-
         view = SelecionarUsuarios(channel=ch, candidatos=candidatos, max_users=50, timeout=180.0)
         await interaction.response.send_message(
             "Selecione os participantes do Duelost e confirme:",
@@ -437,9 +451,6 @@ class DuelosST(commands.Cog):
             return
 
         participantes: List[discord.Member] = view.selecionados
-
-
-
 
         # Prepara estado do duelo (commit-reveal)
         duelo_id = interaction.id  # único por invocação
@@ -469,7 +480,7 @@ class DuelosST(commands.Cog):
 
         # Dispara os painéis (DM ou fallback no canal)
         tasks = [
-            self._enviar_painel_para_jogador(interaction, duelo_id, m, permitir_bomba, float(tempo))
+            self._enviar_painel_para_jogador(interaction, duelo_id, m, permitir_bomba_b, float(tempo))
             for m in participantes
         ]
         await asyncio.gather(*tasks)
@@ -495,8 +506,7 @@ class DuelosST(commands.Cog):
         )
 
         # Publica resultado final no canal
-        if detalhar:
-            # Divide em duas mensagens se ficar muito grande
+        if detalhar_b:
             await interaction.channel.send(texto_resumo)
             await interaction.channel.send(texto_detalhe)
         else:
@@ -504,6 +514,7 @@ class DuelosST(commands.Cog):
 
         # Limpa estado
         self.duelos.pop(duelo_id, None)
+
 
     def _montar_resposta_formatada(
         self,
