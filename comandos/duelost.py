@@ -374,24 +374,26 @@ class DuelosST(commands.Cog):
         ch: discord.TextChannel = interaction.channel
         guild = interaction.guild
 
-        # (opcional) garante cache completo de membros para que ch.members reflita tudo
+        # (opcional) tenta preencher o cache de membros
+        fetch_ok = True
         try:
-            _ = [m async for m in guild.fetch_members(limit=None)]
+            async for _ in guild.fetch_members(limit=None):
+                pass
         except Exception:
-            pass
+            fetch_ok = False  # provavel: intent de membros desativada
 
-        # 📌 Somente quem PODE VER o canal (inclui offline)
+        # 📌 Só quem PODE VER o canal (inclui offline)
         ids_vistos: set[int] = set()
         candidatos: List[discord.Member] = []
 
-        # 1) comece pelos que o Discord já lista para o canal
+        # 1) os que o Discord já lista para o canal
         for m in ch.members:
             if m.bot:
                 continue
             candidatos.append(m)
             ids_vistos.add(m.id)
 
-        # 2) complete com offline que veem o canal, mas não vieram em ch.members
+        # 2) completa com offline que veem o canal
         for m in guild.members:
             if m.bot or m.id in ids_vistos:
                 continue
@@ -399,13 +401,25 @@ class DuelosST(commands.Cog):
                 candidatos.append(m)
                 ids_vistos.add(m.id)
 
-
+        # 3) se ainda ficou vazio, explica o motivo OU inclui ao menos o invocador
         if not candidatos:
-            await interaction.response.send_message(
-                "Não há membros humanos com acesso a este canal para selecionar.",
-                ephemeral=True
-            )
-            return
+            if not fetch_ok:
+                await interaction.response.send_message(
+                    "⚠️ Não consegui listar os membros do canal (provável: **Server Members Intent** desativado no bot ou no Dev Portal). "
+                    "Ative a intenção de membros para incluir offline na seleção.",
+                    ephemeral=True
+                )
+                return
+            # fallback mínimo: permite selecionar o próprio narrador (pra teste)
+            if not user.bot and ch.permissions_for(user).view_channel:
+                candidatos = [user]
+            else:
+                await interaction.response.send_message(
+                    "Não há membros humanos com acesso a este canal para selecionar.",
+                    ephemeral=True
+                )
+                return
+
 
         view = SelecionarUsuarios(channel=ch, candidatos=candidatos, max_users=50, timeout=180.0)
         await interaction.response.send_message(

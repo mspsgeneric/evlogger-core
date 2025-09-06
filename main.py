@@ -53,6 +53,7 @@ MAIL_NAME = os.getenv("MAIL_NAME")
 intents = Intents.default()
 intents.message_content = True
 intents.guilds = True  # necessário para listar guilds e detectar rename
+intents.members = True  # necessário para ver OFFLINE e preencher ch.members/guild.members
 
 # bot = commands.Bot(command_prefix="!", intents=intents)
 bot = commands.Bot(command_prefix=commands.when_mentioned, intents=intents)
