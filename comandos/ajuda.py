@@ -52,11 +52,17 @@ async def setup(bot: commands.Bot):
             inline=False
         )
 
-
         # MINI-JOGOS
         embed.add_field(
             name="🎮 Mini-jogos: Pedra, Papel, Tesoura e Bomba",
-            value="Diversão rápida no chat ou em duelo PvP.",
+            value=(
+                "Diversão rápida no chat ou em duelo PvP.\n\n"
+                "**Traduções rápidas:**\n"
+                "• Pedra = Stone\n"
+                "• Papel = Paper\n"
+                "• Tesoura = Scissors\n"
+                "• Bomba = Bomb\n"
+            ),
             inline=False
         )
 
@@ -92,6 +98,28 @@ async def setup(bot: commands.Bot):
             ),
             inline=False
         )
+
+        # Duelost
+        
+        embed.add_field(
+            name="🛡️ Todos vs ST (Duelost)",
+            value=(
+                "🔒 **Apenas administradores/gestores podem iniciar este comando.**\n\n"
+                "**/duelost [sinal_st] [tempo] [permitir_bomba] [detalhar]**\n"
+                "O **ST** escolhe um sinal (Pedra/Papel/Tesoura/Bomba) e inicia um duelo em massa. "
+                "O bot abre um seletor paginado para escolher participantes (apenas humanos com acesso ao canal). "
+                "Cada participante recebe um painel por **DM** (ou no canal se a DM falhar) para escolher sua jogada.\n\n"
+                "• **sinal_st**: `pedra` | `papel` | `tesoura` | `bomba`\n"
+                "• **tempo**: segundos para respostas (padrão: 60)\n"
+                "• **permitir_bomba**: `sim` ou `nao` (padrão: `nao` — jogadores ficam só com PPT)\n"
+                "• **detalhar**: `sim` ou `nao` (padrão: `sim` — inclui bloco detalhado por jogador)\n"
+                "• **Prova de imparcialidade**: publica um **commit SHA-256** do sinal do ST e, no fim, faz o **reveal** "
+                "mostrando `sha256(\"sinal|nonce\")` para verificação.\n\n"
+                "Ex.: `/duelost sinal_st: Pedra tempo: 60 permitir_bomba: nao detalhar: sim`"
+            ),
+            inline=False
+        )
+
 
         embed.add_field(
             name="⚙️ Outros comandos",
